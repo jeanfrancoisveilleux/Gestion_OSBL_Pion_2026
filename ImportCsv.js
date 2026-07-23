@@ -251,30 +251,3 @@ function calculerEmpreinte_(texte) {
     })
     .join('');
 }
-
-function configurerListesImport() {
-  const classeur = SpreadsheetApp.getActive();
-  const importBancaire =
-    classeur.getSheetByName('Import bancaire');
-  const configuration =
-    classeur.getSheetByName('Configuration');
-
-  const regleComptes = SpreadsheetApp
-    .newDataValidation()
-    .requireValueInRange(
-      configuration.getRange('B6:B47'),
-      true
-    )
-    .setAllowInvalid(false)
-    .build();
-
-  importBancaire
-    .getRange('H6:H1000')
-    .setDataValidation(regleComptes);
-
-  classeur.toast(
-    'Les comptes sont maintenant affichés par leur nom.',
-    'Gestion OSBL',
-    5
-  );
-}

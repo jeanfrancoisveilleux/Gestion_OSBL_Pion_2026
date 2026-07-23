@@ -28,23 +28,11 @@ function installerInterfaceTransactionsMixtes() {
 
   ajouterMenuTransactionsMixtesAuDemarrage();
 
-  const comptesRepares = reparerNomsComptesTransactionsMixtes_();
-  const lignesNettoyees =
-    nettoyerLignesRepartitionSansComposanteMixte_();
-  const bilanRepartition =
-    reparerHistoriquesRepartitionAnnuleeMixte_();
-
   SpreadsheetApp.getUi().alert(
     'L’interface de répartition est installée.\n\n' +
     'Dès que vous choisissez « Transaction mixte » dans la colonne ' +
     '« Mode de traitement » de l’onglet « Import bancaire », la fenêtre ' +
-    'de répartition s’ouvre sans créer de ligne à l’avance.\n\n' +
-    comptesRepares + ' nom(s) de compte réparé(s) et ' +
-    lignesNettoyees + ' ligne(s) de répartition inutile(s) nettoyée(s), ' +
-    bilanRepartition.lignesHistoriquesReparees +
-    ' ligne(s) historique(s) annulée(s) réparée(s), ' +
-    bilanRepartition.notesActivesNormalisees +
-    ' note(s) active(s) normalisée(s).'
+    'de répartition s’ouvre sans créer de ligne à l’avance.'
   );
 }
 
@@ -662,96 +650,6 @@ function marquerRepartitionAnnulee_(
       .getRange(ligne.numero, 17)
       .setValue('Annulée – ' + horodatage);
   });
-}
-
-function reparerHistoriquesRepartitionAnnuleeMixte_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const repartition = obtenirFeuilleMixte_(ss, 'Répartition');
-  const derniereLigne = repartition.getLastRow();
-
-  if (derniereLigne < 6) {
-    return {
-      lignesHistoriquesReparees: 0,
-      notesActivesNormalisees: 0
-    };
-  }
-
-  const lignes = repartition
-    .getRange(6, 1, derniereLigne - 5, 17)
-    .getValues();
-  const groupes = {};
-
-  lignes.forEach(function(ligne, index) {
-    const idImport = String(ligne[0] || '').trim();
-    const synchronisation = String(ligne[16] || '').trim();
-
-    if (!idImport || synchronisation.indexOf('Annulée') !== 0) {
-      return;
-    }
-
-    const cle = idImport + '\u0001' + synchronisation;
-
-    if (!groupes[cle]) {
-      groupes[cle] = {
-        total: 0,
-        lignes: []
-      };
-    }
-
-    groupes[cle].total += Number(ligne[8] || 0);
-    groupes[cle].lignes.push({
-      numero: index + 6,
-      totalBancaire: Number(ligne[3] || 0)
-    });
-  });
-
-  let lignesReparees = 0;
-  let notesActivesNormalisees = 0;
-
-  Object.keys(groupes).forEach(function(cle) {
-    const groupe = groupes[cle];
-    const totalRevision = arrondirMontantMixte_(groupe.total);
-
-    groupe.lignes.forEach(function(item) {
-      const totalBancaire = arrondirMontantMixte_(item.totalBancaire);
-
-      repartition.getRange(item.numero, 13).setValue(totalRevision);
-      repartition.getRange(item.numero, 14).setValue(
-        arrondirMontantMixte_(totalBancaire - totalRevision)
-      );
-      repartition.getRange(item.numero, 15).setValue('Annulée');
-      lignesReparees += 1;
-    });
-  });
-
-  lignes.forEach(function(ligne, index) {
-    const note = String(ligne[16] || '').trim();
-
-    if (note.indexOf('Révision active') !== 0) {
-      return;
-    }
-
-    const noteNormalisee = note.replace(
-      /^(Révision active\s*[–-]\s*de\s+)(\S+)(\s+vers\s+\S+.*)$/,
-      function(_, prefixe, idSource, suffixe) {
-        return prefixe + idSource.replace(/-\d+$/, '') + suffixe;
-      }
-    );
-
-    if (noteNormalisee !== note) {
-      repartition.getRange(index + 6, 17).setValue(noteNormalisee);
-      notesActivesNormalisees += 1;
-    }
-  });
-
-  if (lignesReparees || notesActivesNormalisees) {
-    SpreadsheetApp.flush();
-  }
-
-  return {
-    lignesHistoriquesReparees: lignesReparees,
-    notesActivesNormalisees: notesActivesNormalisees
-  };
 }
 
 function remettreImportBancaireAClasser_(
@@ -1551,37 +1449,6 @@ function enregistrerRepartitionTechniqueMixte_(
   SpreadsheetApp.flush();
 }
 
-function nettoyerLignesRepartitionSansComposanteMixte_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const feuille = obtenirFeuilleMixte_(ss, 'Répartition');
-  const derniereLigne = feuille.getMaxRows();
-
-  if (derniereLigne < 6) {
-    return 0;
-  }
-
-  const valeurs = feuille
-    .getRange(6, 1, derniereLigne - 5, 6)
-    .getDisplayValues();
-  let compteur = 0;
-
-  valeurs.forEach(function(ligne, index) {
-    const idImport = String(ligne[0] || '').trim();
-    const composante = String(ligne[5] || '').trim();
-
-    if (idImport && !composante) {
-      feuille.getRange(index + 6, 1, 1, 17).clearContent();
-      compteur += 1;
-    }
-  });
-
-  if (compteur) {
-    SpreadsheetApp.flush();
-  }
-
-  return compteur;
-}
-
 function trouverBlocVideRepartitionMixte_(feuille, taille) {
   const maximum = feuille.getMaxRows();
   const ids = feuille
@@ -2062,91 +1929,6 @@ function obtenirCompteConfigurationMixte_(codeCompte) {
   throw new Error(
     'Le compte ' + codeRecherche + ' est absent de « Configuration ».'
   );
-}
-
-function reparerNomsComptesTransactionsMixtes_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const transactions = obtenirFeuilleMixte_(ss, 'Transactions');
-  const configuration = obtenirFeuilleMixte_(ss, 'Configuration');
-  const derniereLigneConfiguration = configuration.getLastRow();
-  const derniereLigneTransactions = transactions.getLastRow();
-
-  if (
-    derniereLigneConfiguration < 6 ||
-    derniereLigneTransactions < 6
-  ) {
-    return 0;
-  }
-
-  const comptes = {};
-
-  configuration
-    .getRange(
-      6,
-      1,
-      derniereLigneConfiguration - 5,
-      2
-    )
-    .getValues()
-    .forEach(function(ligne) {
-      const code = String(ligne[0] || '').trim();
-
-      if (code) {
-        comptes[code] = {
-          valeurCode: ligne[0],
-          nom: String(ligne[1] || '').trim()
-        };
-      }
-    });
-
-  const valeurs = transactions
-    .getRange(
-      6,
-      1,
-      derniereLigneTransactions - 5,
-      15
-    )
-    .getValues();
-  let compteur = 0;
-
-  valeurs.forEach(function(ligne, index) {
-    const idTransaction = String(ligne[0] || '').trim();
-    const code = String(ligne[6] || '').trim();
-    const codeEstDuTexte = typeof ligne[6] === 'string';
-    const nomActuel = String(ligne[7] || '').trim();
-    const source = String(ligne[12] || '').trim();
-    const compte = comptes[code];
-
-    if (
-      idTransaction.indexOf('MIX-') === 0 &&
-      source === 'Import' &&
-      compte &&
-      (
-        !codeEstDuTexte ||
-        nomActuel === '' ||
-        nomActuel === 'Compte inconnu' ||
-        nomActuel !== compte.nom
-      )
-    ) {
-      const celluleCode = transactions.getRange(index + 6, 7);
-
-      celluleCode
-        .setNumberFormat('@')
-        .setValue(String(compte.valeurCode));
-
-      transactions
-        .getRange(index + 6, 8)
-        .setValue(compte.nom);
-
-      compteur += 1;
-    }
-  });
-
-  if (compteur) {
-    SpreadsheetApp.flush();
-  }
-
-  return compteur;
 }
 
 function ecrirePaireJournalRevenuMixte_(
