@@ -1331,18 +1331,7 @@ function installerModuleRepartition() {
 
   importBanque.setColumnWidth(15, 150);
 
-  const declencheurExiste = ScriptApp.getProjectTriggers()
-    .some(declencheur =>
-      declencheur.getHandlerFunction() ===
-      'preparerTransactionMixteDepuisBanque'
-    );
-
-  if (!declencheurExiste) {
-    ScriptApp.newTrigger('preparerTransactionMixteDepuisBanque')
-      .forSpreadsheet(classeur)
-      .onEdit()
-      .create();
-  }
+  installerInterfaceTransactionsMixtes();
 
   SpreadsheetApp.getUi().alert(
     'Le module de répartition est installé.'

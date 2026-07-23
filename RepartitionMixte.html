@@ -68,6 +68,10 @@
         text-align: right;
       }
 
+      .montant-bancaire.negatif {
+        color: var(--rouge);
+      }
+
       table {
         width: 100%;
         border-collapse: collapse;
@@ -106,26 +110,18 @@
         border-color: var(--bleu);
       }
 
-      .col-composante {
-        width: 42%;
-      }
+      /* Colonnes mode revenu */
+      .col-composante { width: 42%; }
+      .col-quantite   { width: 13%; }
+      .col-prix       { width: 17%; }
+      .col-montant    { width: 18%; }
+      .col-action     { width: 10%; text-align: center; }
 
-      .col-quantite {
-        width: 13%;
-      }
-
-      .col-prix {
-        width: 17%;
-      }
-
-      .col-montant {
-        width: 18%;
-      }
-
-      .col-action {
-        width: 10%;
-        text-align: center;
-      }
+      /* Colonnes mode dépense */
+      .col-compte     { width: 34%; }
+      .col-programme  { width: 22%; }
+      .col-projet     { width: 18%; }
+      .col-montant-dep{ width: 16%; }
 
       .montant-ligne {
         font-weight: 600;
@@ -193,17 +189,9 @@
         font-weight: 700;
       }
 
-      .pret {
-        color: var(--vert);
-      }
-
-      .incomplet {
-        color: var(--orange);
-      }
-
-      .depassement {
-        color: var(--rouge);
-      }
+      .pret      { color: var(--vert); }
+      .incomplet { color: var(--orange); }
+      .depassement { color: var(--rouge); }
 
       .message {
         min-height: 21px;
@@ -211,13 +199,8 @@
         font-size: 13px;
       }
 
-      .message.erreur {
-        color: var(--rouge);
-      }
-
-      .message.succes {
-        color: var(--vert);
-      }
+      .message.erreur { color: var(--rouge); }
+      .message.succes { color: var(--vert); }
 
       .pied {
         display: flex;
@@ -238,20 +221,14 @@
         font-weight: 700;
       }
 
-      .principal:hover:not(:disabled) {
-        background: var(--bleu-fonce);
-      }
-
-      .principal:disabled {
-        background: #a9c7f5;
-        cursor: default;
-      }
+      .principal:hover:not(:disabled) { background: var(--bleu-fonce); }
+      .principal:disabled { background: #a9c7f5; cursor: default; }
     </style>
   </head>
   <body>
     <h1 id="titreInterface">Répartir la transaction</h1>
-    <div class="sous-titre">
-      Ajoutez jusqu’à cinq composantes. Le total doit correspondre exactement au montant bancaire.
+    <div class="sous-titre" id="sousTitre">
+      Ajoutez jusqu'à cinq composantes. Le total doit correspondre exactement au montant bancaire.
     </div>
 
     <div class="resume">
@@ -270,15 +247,7 @@
     </div>
 
     <table>
-      <thead>
-        <tr>
-          <th class="col-composante">Composante</th>
-          <th class="col-quantite">Quantité</th>
-          <th class="col-prix">Prix unitaire</th>
-          <th class="col-montant">Montant</th>
-          <th class="col-action"></th>
-        </tr>
-      </thead>
+      <thead id="enTetes"></thead>
       <tbody id="lignes"></tbody>
     </table>
 
@@ -315,6 +284,7 @@
     <script>
       const DONNEES = <?!= donnees ?>;
       const MAX_LIGNES = 5;
+      const EST_DEPENSE = DONNEES.typeMouvement === 'depense';
       let lignes = [];
 
       const formatMonetaire = new Intl.NumberFormat('fr-CA', {
@@ -334,6 +304,8 @@
         return Math.round((nombre(valeur) + Number.EPSILON) * 100) / 100;
       }
 
+      /* ── Mode revenu ─────────────────────────────────────── */
+
       function prixParDefaut(composante) {
         const option = DONNEES.options.find(
           element => element.valeur === composante
@@ -341,7 +313,7 @@
         return option ? nombre(option.prix) : 0;
       }
 
-      function creerSelection(composante, index) {
+      function creerSelectionComposante(composante, index) {
         const selection = document.createElement('select');
         selection.setAttribute('aria-label', 'Composante');
 
@@ -367,7 +339,7 @@
         return selection;
       }
 
-      function creerChampNombre(valeur, etiquette, callback, pas) {
+      function creerChampNombreRevenu(valeur, etiquette, callback, pas) {
         const champ = document.createElement('input');
         champ.type = 'number';
         champ.min = '0';
@@ -381,7 +353,7 @@
         return champ;
       }
 
-      function afficherLignes() {
+      function afficherLignesRevenu() {
         const corps = document.getElementById('lignes');
         corps.textContent = '';
 
@@ -389,27 +361,21 @@
           const rangee = document.createElement('tr');
 
           const celluleComposante = document.createElement('td');
-          celluleComposante.appendChild(
-            creerSelection(ligne.composante, index)
-          );
+          celluleComposante.appendChild(creerSelectionComposante(ligne.composante, index));
 
           const celluleQuantite = document.createElement('td');
           celluleQuantite.appendChild(
-            creerChampNombre(
-              ligne.quantite,
-              'Quantité',
-              valeur => lignes[index].quantite = valeur,
-              '1'
+            creerChampNombreRevenu(
+              ligne.quantite, 'Quantité',
+              valeur => { lignes[index].quantite = valeur; }, '1'
             )
           );
 
           const cellulePrix = document.createElement('td');
           cellulePrix.appendChild(
-            creerChampNombre(
-              ligne.prixUnitaire,
-              'Prix unitaire',
-              valeur => lignes[index].prixUnitaire = valeur,
-              '0.01'
+            creerChampNombreRevenu(
+              ligne.prixUnitaire, 'Prix unitaire',
+              valeur => { lignes[index].prixUnitaire = valeur; }, '0.01'
             )
           );
 
@@ -419,67 +385,219 @@
 
           const celluleAction = document.createElement('td');
           celluleAction.className = 'col-action';
-
-          const supprimer = document.createElement('button');
-          supprimer.type = 'button';
-          supprimer.className = 'supprimer';
-          supprimer.textContent = '×';
-          supprimer.title = 'Supprimer cette composante';
-          supprimer.addEventListener('click', () => {
-            lignes.splice(index, 1);
+          celluleAction.appendChild(creerBoutonSupprimer(index, function() {
             if (lignes.length === 0) {
-              lignes.push({
-                composante: '',
-                quantite: 1,
-                prixUnitaire: 0
-              });
+              lignes.push({ composante: '', quantite: 1, prixUnitaire: 0 });
             }
-            afficherLignes();
-          });
+          }));
 
-          celluleAction.appendChild(supprimer);
-          rangee.append(
-            celluleComposante,
-            celluleQuantite,
-            cellulePrix,
-            celluleMontant,
-            celluleAction
-          );
+          rangee.append(celluleComposante, celluleQuantite, cellulePrix, celluleMontant, celluleAction);
           corps.appendChild(rangee);
         });
 
-        document.getElementById('ajouter').disabled =
-          lignes.length >= MAX_LIGNES;
-
+        document.getElementById('ajouter').disabled = lignes.length >= MAX_LIGNES;
         calculerTotaux();
+      }
+
+      /* ── Mode dépense ────────────────────────────────────── */
+
+      function creerSelectionCompte(codeSelectionne, index) {
+        const sel = document.createElement('select');
+        sel.setAttribute('aria-label', 'Compte comptable');
+
+        const vide = document.createElement('option');
+        vide.value = '';
+        vide.textContent = 'Sélectionner un compte…';
+        sel.appendChild(vide);
+
+        (DONNEES.comptes || []).forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.code;
+          opt.textContent = c.code + ' – ' + c.nom;
+          opt.selected = c.code === codeSelectionne;
+          sel.appendChild(opt);
+        });
+
+        sel.addEventListener('change', () => {
+          lignes[index].compte = sel.value;
+          calculerTotaux();
+        });
+
+        return sel;
+      }
+
+      function creerSelectionProgramme(valeurSelectionnee, index) {
+        const sel = document.createElement('select');
+        sel.setAttribute('aria-label', 'Programme');
+
+        const vide = document.createElement('option');
+        vide.value = '';
+        vide.textContent = '(Aucun)';
+        sel.appendChild(vide);
+
+        (DONNEES.programmes || []).forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p;
+          opt.textContent = p;
+          opt.selected = p === valeurSelectionnee;
+          sel.appendChild(opt);
+        });
+
+        sel.addEventListener('change', () => {
+          lignes[index].programme = sel.value;
+        });
+
+        return sel;
+      }
+
+      function creerSelectionProjet(valeurSelectionnee, index) {
+        const sel = document.createElement('select');
+        sel.setAttribute('aria-label', 'Projet');
+
+        const vide = document.createElement('option');
+        vide.value = '';
+        vide.textContent = '(Aucun)';
+        sel.appendChild(vide);
+
+        (DONNEES.projets || []).forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = p.id + (p.nom ? ' – ' + p.nom : '');
+          opt.selected = p.id === valeurSelectionnee;
+          sel.appendChild(opt);
+        });
+
+        sel.addEventListener('change', () => {
+          lignes[index].projet = sel.value;
+        });
+
+        return sel;
+      }
+
+      function creerChampMontantDepense(valeur, index) {
+        const champ = document.createElement('input');
+        champ.type = 'number';
+        champ.min = '0.01';
+        champ.step = '0.01';
+        champ.value = valeur || '';
+        champ.setAttribute('aria-label', 'Montant');
+        champ.addEventListener('input', () => {
+          lignes[index].montant = nombre(champ.value);
+          calculerTotaux();
+        });
+        return champ;
+      }
+
+      function afficherLignesDepense() {
+        const corps = document.getElementById('lignes');
+        corps.textContent = '';
+
+        lignes.forEach((ligne, index) => {
+          const rangee = document.createElement('tr');
+
+          const tdCompte = document.createElement('td');
+          tdCompte.className = 'col-compte';
+          tdCompte.appendChild(creerSelectionCompte(ligne.compte, index));
+
+          const tdProg = document.createElement('td');
+          tdProg.className = 'col-programme';
+          tdProg.appendChild(creerSelectionProgramme(ligne.programme, index));
+
+          const tdProj = document.createElement('td');
+          tdProj.className = 'col-projet';
+          tdProj.appendChild(creerSelectionProjet(ligne.projet, index));
+
+          const tdMontant = document.createElement('td');
+          tdMontant.className = 'col-montant-dep';
+          tdMontant.appendChild(creerChampMontantDepense(ligne.montant || '', index));
+
+          const tdAction = document.createElement('td');
+          tdAction.className = 'col-action';
+          tdAction.appendChild(creerBoutonSupprimer(index, function() {
+            if (lignes.length === 0) {
+              lignes.push({ compte: '', programme: '', projet: '', montant: 0 });
+            }
+          }));
+
+          rangee.append(tdCompte, tdProg, tdProj, tdMontant, tdAction);
+          corps.appendChild(rangee);
+        });
+
+        document.getElementById('ajouter').disabled = lignes.length >= MAX_LIGNES;
+        calculerTotaux();
+      }
+
+      /* ── Commun ──────────────────────────────────────────── */
+
+      function creerBoutonSupprimer(index, apresSuppressionVide) {
+        const bouton = document.createElement('button');
+        bouton.type = 'button';
+        bouton.className = 'supprimer';
+        bouton.textContent = '×';
+        bouton.title = 'Supprimer cette ligne';
+        bouton.addEventListener('click', () => {
+          lignes.splice(index, 1);
+          apresSuppressionVide();
+          afficherLignes();
+        });
+        return bouton;
+      }
+
+      function afficherLignes() {
+        if (EST_DEPENSE) {
+          afficherLignesDepense();
+        } else {
+          afficherLignesRevenu();
+        }
       }
 
       function calculerTotaux() {
         let total = 0;
 
-        lignes.forEach((ligne, index) => {
-          const montant = arrondir(
-            nombre(ligne.quantite) * nombre(ligne.prixUnitaire)
-          );
-          total += montant;
+        if (EST_DEPENSE) {
+          lignes.forEach((ligne, index) => {
+            const montant = arrondir(nombre(ligne.montant));
+            total += montant;
+          });
 
-          const cellule = document.querySelector(
-            '.montant-ligne[data-index="' + index + '"]'
+          total = arrondir(total);
+          const cible = arrondir(DONNEES.montantAbsolu || 0);
+          const reste = arrondir(cible - total);
+          const lignesValides = lignes.length > 0 && lignes.every(l =>
+            l.compte && nombre(l.montant) > 0
           );
-          if (cellule) {
-            cellule.textContent = formatMonetaire.format(montant);
-          }
-        });
 
-        total = arrondir(total);
-        const reste = arrondir(nombre(DONNEES.montant) - total);
+          mettreAJourAffichageTotaux(total, reste, lignesValides);
+        } else {
+          lignes.forEach((ligne, index) => {
+            const montant = arrondir(
+              nombre(ligne.quantite) * nombre(ligne.prixUnitaire)
+            );
+            total += montant;
+
+            const cellule = document.querySelector(
+              '.montant-ligne[data-index="' + index + '"]'
+            );
+            if (cellule) {
+              cellule.textContent = formatMonetaire.format(montant);
+            }
+          });
+
+          total = arrondir(total);
+          const reste = arrondir(nombre(DONNEES.montant) - total);
+          const lignesValides = lignes.length > 0 && lignes.every(ligne =>
+            ligne.composante &&
+            nombre(ligne.quantite) > 0 &&
+            nombre(ligne.prixUnitaire) >= 0
+          );
+
+          mettreAJourAffichageTotaux(total, reste, lignesValides);
+        }
+      }
+
+      function mettreAJourAffichageTotaux(total, reste, lignesValides) {
         const elementReste = document.getElementById('reste');
         const bouton = document.getElementById('enregistrer');
-        const lignesValides = lignes.length > 0 && lignes.every(ligne =>
-          ligne.composante &&
-          nombre(ligne.quantite) > 0 &&
-          nombre(ligne.prixUnitaire) >= 0
-        );
 
         document.getElementById('totalReparti').textContent =
           formatMonetaire.format(total);
@@ -506,16 +624,6 @@
         bouton.textContent = 'Enregistrement…';
         afficherMessage('', '');
 
-        const donnees = {
-          idImport: DONNEES.idImport,
-          idTransactionSource: DONNEES.idTransactionSource || '',
-          lignes: lignes.map(ligne => ({
-            composante: ligne.composante,
-            quantite: nombre(ligne.quantite),
-            prixUnitaire: nombre(ligne.prixUnitaire)
-          }))
-        };
-
         const appel = google.script.run
           .withSuccessHandler(resultat => {
             afficherMessage(resultat.message, 'succes');
@@ -524,53 +632,117 @@
           })
           .withFailureHandler(erreur => {
             afficherMessage(
-              erreur && erreur.message
-                ? erreur.message
-                : 'Une erreur est survenue.',
+              erreur && erreur.message ? erreur.message : 'Une erreur est survenue.',
               'erreur'
             );
             bouton.textContent = DONNEES.boutonPrincipal || 'Enregistrer';
             calculerTotaux();
           });
 
-        if (DONNEES.mode === 'revision') {
-          appel.enregistrerRevisionTransactionMixte(donnees);
+        if (EST_DEPENSE) {
+          const donnees = {
+            idImport: DONNEES.idImport,
+            idTransactionSource: DONNEES.idTransactionSource || '',
+            lignes: lignes.map(l => ({
+              compte: l.compte,
+              programme: l.programme || '',
+              projet: l.projet || '',
+              montant: nombre(l.montant)
+            }))
+          };
+
+          if (DONNEES.mode === 'revision') {
+            appel.enregistrerRevisionDepenseBancaireMixte(donnees);
+          } else {
+            appel.enregistrerEtComptabiliserDepenseBancaireMixte(donnees);
+          }
         } else {
-          appel.enregistrerEtComptabiliserTransactionMixte(donnees);
+          const donnees = {
+            idImport: DONNEES.idImport,
+            idTransactionSource: DONNEES.idTransactionSource || '',
+            lignes: lignes.map(ligne => ({
+              composante: ligne.composante,
+              quantite: nombre(ligne.quantite),
+              prixUnitaire: nombre(ligne.prixUnitaire)
+            }))
+          };
+
+          if (DONNEES.mode === 'revision') {
+            appel.enregistrerRevisionTransactionMixte(donnees);
+          } else {
+            appel.enregistrerEtComptabiliserTransactionMixte(donnees);
+          }
         }
       }
 
+      /* ── Initialisation ──────────────────────────────────── */
+
       document.getElementById('titreInterface').textContent =
         DONNEES.titre || 'Répartir la transaction';
+
       document.getElementById('enregistrer').textContent =
         DONNEES.boutonPrincipal || 'Enregistrer et comptabiliser';
-      document.getElementById('date').textContent = DONNEES.date;
-      document.getElementById('description').textContent =
-        DONNEES.description;
-      document.getElementById('montantBancaire').textContent =
-        formatMonetaire.format(DONNEES.montant);
 
-      lignes = DONNEES.lignes.map(ligne => ({
-        composante: ligne.composante || '',
-        quantite: nombre(ligne.quantite || 1),
-        prixUnitaire: nombre(ligne.prixUnitaire || 0)
-      }));
+      document.getElementById('date').textContent = DONNEES.date;
+      document.getElementById('description').textContent = DONNEES.description;
+
+      const elemMontant = document.getElementById('montantBancaire');
+      elemMontant.textContent = formatMonetaire.format(DONNEES.montant);
+      if (DONNEES.montant < 0) {
+        elemMontant.classList.add('negatif');
+      }
+
+      if (EST_DEPENSE) {
+        document.getElementById('sousTitre').textContent =
+          "Ajoutez jusqu'à cinq lignes de dépense. " +
+          "Le total doit correspondre à la valeur absolue du montant bancaire.";
+
+        document.getElementById('ajouter').textContent = '+ Ajouter une ligne';
+
+        document.getElementById('enTetes').innerHTML =
+          '<tr>' +
+          '<th class="col-compte">Compte comptable</th>' +
+          '<th class="col-programme">Programme</th>' +
+          '<th class="col-projet">Projet</th>' +
+          '<th class="col-montant-dep">Montant ($)</th>' +
+          '<th class="col-action"></th>' +
+          '</tr>';
+
+        lignes = DONNEES.lignes.map(l => ({
+          compte: l.compte || '',
+          programme: l.programme || '',
+          projet: l.projet || '',
+          montant: nombre(l.montant || 0)
+        }));
+      } else {
+        document.getElementById('enTetes').innerHTML =
+          '<tr>' +
+          '<th class="col-composante">Composante</th>' +
+          '<th class="col-quantite">Quantité</th>' +
+          '<th class="col-prix">Prix unitaire</th>' +
+          '<th class="col-montant">Montant</th>' +
+          '<th class="col-action"></th>' +
+          '</tr>';
+
+        lignes = DONNEES.lignes.map(ligne => ({
+          composante: ligne.composante || '',
+          quantite: nombre(ligne.quantite || 1),
+          prixUnitaire: nombre(ligne.prixUnitaire || 0)
+        }));
+      }
 
       document.getElementById('ajouter').addEventListener('click', () => {
         if (lignes.length < MAX_LIGNES) {
-          lignes.push({
-            composante: '',
-            quantite: 1,
-            prixUnitaire: 0
-          });
+          if (EST_DEPENSE) {
+            lignes.push({ compte: '', programme: '', projet: '', montant: 0 });
+          } else {
+            lignes.push({ composante: '', quantite: 1, prixUnitaire: 0 });
+          }
           afficherLignes();
         }
       });
 
-      document.getElementById('enregistrer').addEventListener(
-        'click',
-        enregistrer
-      );
+      document.getElementById('enregistrer').addEventListener('click', enregistrer);
 
       afficherLignes();
     </script>
