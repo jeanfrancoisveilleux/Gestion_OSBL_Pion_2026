@@ -31,6 +31,8 @@ function installerInterfaceTransactionsMixtes() {
   const comptesRepares = reparerNomsComptesTransactionsMixtes_();
   const lignesNettoyees =
     nettoyerLignesRepartitionSansComposanteMixte_();
+  const bilanRepartition =
+    reparerHistoriquesRepartitionAnnuleeMixte_();
 
   SpreadsheetApp.getUi().alert(
     'L’interface de répartition est installée.\n\n' +
@@ -38,7 +40,11 @@ function installerInterfaceTransactionsMixtes() {
     '« Mode de traitement » de l’onglet « Import bancaire », la fenêtre ' +
     'de répartition s’ouvre sans créer de ligne à l’avance.\n\n' +
     comptesRepares + ' nom(s) de compte réparé(s) et ' +
-    lignesNettoyees + ' ligne(s) de répartition inutile(s) nettoyée(s).'
+    lignesNettoyees + ' ligne(s) de répartition inutile(s) nettoyée(s), ' +
+    bilanRepartition.lignesHistoriquesReparees +
+    ' ligne(s) historique(s) annulée(s) réparée(s), ' +
+    bilanRepartition.notesActivesNormalisees +
+    ' note(s) active(s) normalisée(s).'
   );
 }
 
@@ -627,14 +633,125 @@ function marquerRepartitionAnnulee_(
     repartition.getRange(5, 17).setValue('Synchronisation');
   }
 
-  lireLignesActivesRepartitionMixte_(
+  const lignesActives = lireLignesActivesRepartitionMixte_(
     repartition,
     referenceBancaire
-  ).forEach(function(ligne) {
+  );
+
+  if (!lignesActives.length) {
+    return;
+  }
+
+  const totalRevision = arrondirMontantMixte_(
+    lignesActives.reduce(function(total, ligne) {
+      return total + Number(ligne.valeurs[8] || 0);
+    }, 0)
+  );
+
+  lignesActives.forEach(function(ligne) {
+    const totalBancaire = arrondirMontantMixte_(
+      Number(ligne.valeurs[3] || 0)
+    );
+
+    repartition.getRange(ligne.numero, 13).setValue(totalRevision);
+    repartition.getRange(ligne.numero, 14).setValue(
+      arrondirMontantMixte_(totalBancaire - totalRevision)
+    );
+    repartition.getRange(ligne.numero, 15).setValue('Annulée');
     repartition
       .getRange(ligne.numero, 17)
       .setValue('Annulée – ' + horodatage);
   });
+}
+
+function reparerHistoriquesRepartitionAnnuleeMixte_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const repartition = obtenirFeuilleMixte_(ss, 'Répartition');
+  const derniereLigne = repartition.getLastRow();
+
+  if (derniereLigne < 6) {
+    return {
+      lignesHistoriquesReparees: 0,
+      notesActivesNormalisees: 0
+    };
+  }
+
+  const lignes = repartition
+    .getRange(6, 1, derniereLigne - 5, 17)
+    .getValues();
+  const groupes = {};
+
+  lignes.forEach(function(ligne, index) {
+    const idImport = String(ligne[0] || '').trim();
+    const synchronisation = String(ligne[16] || '').trim();
+
+    if (!idImport || synchronisation.indexOf('Annulée') !== 0) {
+      return;
+    }
+
+    const cle = idImport + '\u0001' + synchronisation;
+
+    if (!groupes[cle]) {
+      groupes[cle] = {
+        total: 0,
+        lignes: []
+      };
+    }
+
+    groupes[cle].total += Number(ligne[8] || 0);
+    groupes[cle].lignes.push({
+      numero: index + 6,
+      totalBancaire: Number(ligne[3] || 0)
+    });
+  });
+
+  let lignesReparees = 0;
+  let notesActivesNormalisees = 0;
+
+  Object.keys(groupes).forEach(function(cle) {
+    const groupe = groupes[cle];
+    const totalRevision = arrondirMontantMixte_(groupe.total);
+
+    groupe.lignes.forEach(function(item) {
+      const totalBancaire = arrondirMontantMixte_(item.totalBancaire);
+
+      repartition.getRange(item.numero, 13).setValue(totalRevision);
+      repartition.getRange(item.numero, 14).setValue(
+        arrondirMontantMixte_(totalBancaire - totalRevision)
+      );
+      repartition.getRange(item.numero, 15).setValue('Annulée');
+      lignesReparees += 1;
+    });
+  });
+
+  lignes.forEach(function(ligne, index) {
+    const note = String(ligne[16] || '').trim();
+
+    if (note.indexOf('Révision active') !== 0) {
+      return;
+    }
+
+    const noteNormalisee = note.replace(
+      /^(Révision active\s*[–-]\s*de\s+)(\S+)(\s+vers\s+\S+.*)$/,
+      function(_, prefixe, idSource, suffixe) {
+        return prefixe + idSource.replace(/-\d+$/, '') + suffixe;
+      }
+    );
+
+    if (noteNormalisee !== note) {
+      repartition.getRange(index + 6, 17).setValue(noteNormalisee);
+      notesActivesNormalisees += 1;
+    }
+  });
+
+  if (lignesReparees || notesActivesNormalisees) {
+    SpreadsheetApp.flush();
+  }
+
+  return {
+    lignesHistoriquesReparees: lignesReparees,
+    notesActivesNormalisees: notesActivesNormalisees
+  };
 }
 
 function remettreImportBancaireAClasser_(
@@ -977,6 +1094,9 @@ function enregistrerRevisionTransactionMixte(donnees) {
     const contexte = preparerContexteTraitementMixte_(donnees, {
       modeRevision: true
     });
+    const idRevisionSource = extraireIdGroupeDepuisTransactionMixte_(
+      contexte.idTransactionSource
+    );
 
     annulerGroupeTransactionsOSBLSansVerrou_(
       contexte.idTransactionSource,
@@ -995,7 +1115,7 @@ function enregistrerRevisionTransactionMixte(donnees) {
         conserverHistorique: true,
         noteRevision:
           'Révision active – de ' +
-          contexte.idTransactionSource +
+          idRevisionSource +
           ' vers ' +
           contexte.idGroupeCible
       }
@@ -1005,7 +1125,7 @@ function enregistrerRevisionTransactionMixte(donnees) {
       contexte.idImport,
       {
         idGroupeForce: contexte.idGroupeCible,
-        idRevisionSource: contexte.idTransactionSource
+        idRevisionSource: idRevisionSource
       }
     );
 
@@ -1208,6 +1328,10 @@ function preparerContexteTraitementMixte_(donnees, options) {
     lignes: lignes,
     repartition: repartition
   };
+}
+
+function extraireIdGroupeDepuisTransactionMixte_(idTransaction) {
+  return String(idTransaction || '').trim().replace(/-\d+$/, '');
 }
 
 function convertirLignesSaisiesVersActivesMixte_(lignes, idImport) {
