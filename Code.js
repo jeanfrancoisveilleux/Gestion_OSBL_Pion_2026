@@ -160,6 +160,67 @@ function verifierSysteme() {
   );
 }
 
+function installerProtectionsDonneesGenerees() {
+  const classeur = SpreadsheetApp.getActive();
+  const ongletsCibles = [
+    'Transactions',
+    'Journal',
+    'Répartition',
+    'Forfaits'
+  ];
+  const prefixeDescription = 'Gestion OSBL – données générées – ';
+
+  let protectionsCreees = 0;
+  let protectionsActualisees = 0;
+  let doublonsSupprimes = 0;
+  const ongletsManquants = [];
+
+  ongletsCibles.forEach(function(nomOnglet) {
+    const feuille = classeur.getSheetByName(nomOnglet);
+
+    if (!feuille) {
+      ongletsManquants.push(nomOnglet);
+      return;
+    }
+
+    const description = prefixeDescription + nomOnglet;
+    const protections = feuille
+      .getProtections(SpreadsheetApp.ProtectionType.SHEET)
+      .filter(function(protection) {
+        return String(protection.getDescription() || '') === description;
+      });
+
+    let protectionReference = protections[0] || null;
+
+    if (!protectionReference) {
+      protectionReference = feuille.protect();
+      protectionsCreees += 1;
+    } else {
+      protectionsActualisees += 1;
+    }
+
+    protectionReference.setDescription(description);
+    protectionReference.setWarningOnly(true);
+
+    protections.slice(1).forEach(function(protectionDoublon) {
+      protectionDoublon.remove();
+      doublonsSupprimes += 1;
+    });
+  });
+
+  const message =
+    'Installation des protections terminée.\n\n' +
+    'Protections créées : ' + protectionsCreees + '\n' +
+    'Protections actualisées : ' + protectionsActualisees + '\n' +
+    'Doublons supprimés : ' + doublonsSupprimes + '\n' +
+    'Onglets manquants : ' +
+    (ongletsManquants.length
+      ? ongletsManquants.join(', ')
+      : 'Aucun');
+
+  SpreadsheetApp.getUi().alert(message);
+}
+
 function afficherSaisieTransaction() {
   const interface = HtmlService
     .createHtmlOutputFromFile('Transaction')
