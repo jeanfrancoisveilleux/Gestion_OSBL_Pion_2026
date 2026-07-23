@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <style>
+      :root {
+        --bleu: #1a73e8;
+        --bleu-fonce: #1558b0;
+        --bordure: #d9dfe8;
+        --fond: #f7f9fc;
+        --texte: #202124;
+        --secondaire: #5f6368;
+        --vert: #137333;
+        --rouge: #b3261e;
+        --orange: #b06000;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 22px;
+        color: var(--texte);
+        font-family: Arial, sans-serif;
+        font-size: 14px;
+        background: #fff;
+      }
+
+      h1 {
+        margin: 0 0 6px;
+        font-size: 21px;
+      }
+
+      .sous-titre {
+        margin-bottom: 18px;
+        color: var(--secondaire);
+      }
+
+      .resume {
+        display: grid;
+        grid-template-columns: 130px 1fr 150px;
+        gap: 14px;
+        align-items: center;
+        margin-bottom: 18px;
+        padding: 14px;
+        border: 1px solid var(--bordure);
+        border-radius: 10px;
+        background: var(--fond);
+      }
+
+      .etiquette {
+        margin-bottom: 4px;
+        color: var(--secondaire);
+        font-size: 12px;
+      }
+
+      .valeur {
+        font-weight: 600;
+      }
+
+      .montant-bancaire {
+        color: var(--bleu-fonce);
+        font-size: 22px;
+        font-weight: 700;
+        text-align: right;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th {
+        padding: 9px 7px;
+        color: var(--secondaire);
+        font-size: 12px;
+        font-weight: 600;
+        text-align: left;
+        border-bottom: 1px solid var(--bordure);
+      }
+
+      td {
+        padding: 8px 7px;
+        border-bottom: 1px solid #edf0f4;
+        vertical-align: middle;
+      }
+
+      select,
+      input {
+        width: 100%;
+        height: 36px;
+        padding: 7px 9px;
+        border: 1px solid #c8ced8;
+        border-radius: 6px;
+        color: var(--texte);
+        background: #fff;
+        font: inherit;
+      }
+
+      select:focus,
+      input:focus {
+        outline: 2px solid #d2e3fc;
+        border-color: var(--bleu);
+      }
+
+      .col-composante {
+        width: 42%;
+      }
+
+      .col-quantite {
+        width: 13%;
+      }
+
+      .col-prix {
+        width: 17%;
+      }
+
+      .col-montant {
+        width: 18%;
+      }
+
+      .col-action {
+        width: 10%;
+        text-align: center;
+      }
+
+      .montant-ligne {
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .supprimer {
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        border: 1px solid #e1e5eb;
+        border-radius: 6px;
+        color: var(--rouge);
+        background: #fff;
+        cursor: pointer;
+        font-size: 18px;
+      }
+
+      .supprimer:hover {
+        background: #fce8e6;
+      }
+
+      .barre-ajout {
+        margin-top: 12px;
+      }
+
+      .secondaire {
+        padding: 9px 13px;
+        border: 1px solid #c8ced8;
+        border-radius: 6px;
+        color: var(--bleu-fonce);
+        background: #fff;
+        cursor: pointer;
+        font-weight: 600;
+      }
+
+      .secondaire:disabled {
+        color: #9aa0a6;
+        cursor: default;
+      }
+
+      .totaux {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 18px;
+      }
+
+      .carte-total {
+        width: 300px;
+        padding: 13px 15px;
+        border: 1px solid var(--bordure);
+        border-radius: 9px;
+        background: var(--fond);
+      }
+
+      .ligne-total {
+        display: flex;
+        justify-content: space-between;
+        margin: 5px 0;
+      }
+
+      .reste {
+        padding-top: 8px;
+        border-top: 1px solid var(--bordure);
+        font-weight: 700;
+      }
+
+      .pret {
+        color: var(--vert);
+      }
+
+      .incomplet {
+        color: var(--orange);
+      }
+
+      .depassement {
+        color: var(--rouge);
+      }
+
+      .message {
+        min-height: 21px;
+        margin-top: 13px;
+        font-size: 13px;
+      }
+
+      .message.erreur {
+        color: var(--rouge);
+      }
+
+      .message.succes {
+        color: var(--vert);
+      }
+
+      .pied {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 14px;
+        padding-top: 14px;
+        border-top: 1px solid var(--bordure);
+      }
+
+      .principal {
+        padding: 10px 17px;
+        border: 0;
+        border-radius: 6px;
+        color: #fff;
+        background: var(--bleu);
+        cursor: pointer;
+        font-weight: 700;
+      }
+
+      .principal:hover:not(:disabled) {
+        background: var(--bleu-fonce);
+      }
+
+      .principal:disabled {
+        background: #a9c7f5;
+        cursor: default;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Répartir la transaction</h1>
+    <div class="sous-titre">
+      Ajoutez jusqu’à cinq composantes. Le total doit correspondre exactement au montant bancaire.
+    </div>
+
+    <div class="resume">
+      <div>
+        <div class="etiquette">Date</div>
+        <div class="valeur" id="date"></div>
+      </div>
+      <div>
+        <div class="etiquette">Transaction bancaire</div>
+        <div class="valeur" id="description"></div>
+      </div>
+      <div>
+        <div class="etiquette" style="text-align:right">Montant</div>
+        <div class="montant-bancaire" id="montantBancaire"></div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="col-composante">Composante</th>
+          <th class="col-quantite">Quantité</th>
+          <th class="col-prix">Prix unitaire</th>
+          <th class="col-montant">Montant</th>
+          <th class="col-action"></th>
+        </tr>
+      </thead>
+      <tbody id="lignes"></tbody>
+    </table>
+
+    <div class="barre-ajout">
+      <button class="secondaire" id="ajouter" type="button">
+        + Ajouter une composante
+      </button>
+    </div>
+
+    <div class="totaux">
+      <div class="carte-total">
+        <div class="ligne-total">
+          <span>Total réparti</span>
+          <strong id="totalReparti">0,00 $</strong>
+        </div>
+        <div class="ligne-total reste">
+          <span>Reste à répartir</span>
+          <strong id="reste">0,00 $</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="message" id="message"></div>
+
+    <div class="pied">
+      <button class="secondaire" type="button" onclick="google.script.host.close()">
+        Annuler
+      </button>
+      <button class="principal" id="enregistrer" type="button">
+        Enregistrer et comptabiliser
+      </button>
+    </div>
+
+    <script>
+      const DONNEES = <?!= donnees ?>;
+      const MAX_LIGNES = 5;
+      let lignes = [];
+
+      const formatMonetaire = new Intl.NumberFormat('fr-CA', {
+        style: 'currency',
+        currency: 'CAD'
+      });
+
+      function nombre(valeur) {
+        if (typeof valeur === 'string') {
+          valeur = valeur.replace(',', '.');
+        }
+        const resultat = Number(valeur);
+        return Number.isFinite(resultat) ? resultat : 0;
+      }
+
+      function arrondir(valeur) {
+        return Math.round((nombre(valeur) + Number.EPSILON) * 100) / 100;
+      }
+
+      function prixParDefaut(composante) {
+        const option = DONNEES.options.find(
+          element => element.valeur === composante
+        );
+        return option ? nombre(option.prix) : 0;
+      }
+
+      function creerSelection(composante, index) {
+        const selection = document.createElement('select');
+        selection.setAttribute('aria-label', 'Composante');
+
+        const vide = document.createElement('option');
+        vide.value = '';
+        vide.textContent = 'Sélectionner…';
+        selection.appendChild(vide);
+
+        DONNEES.options.forEach(option => {
+          const element = document.createElement('option');
+          element.value = option.valeur;
+          element.textContent = option.valeur;
+          element.selected = option.valeur === composante;
+          selection.appendChild(element);
+        });
+
+        selection.addEventListener('change', () => {
+          lignes[index].composante = selection.value;
+          lignes[index].prixUnitaire = prixParDefaut(selection.value);
+          afficherLignes();
+        });
+
+        return selection;
+      }
+
+      function creerChampNombre(valeur, etiquette, callback, pas) {
+        const champ = document.createElement('input');
+        champ.type = 'number';
+        champ.min = '0';
+        champ.step = pas;
+        champ.value = valeur;
+        champ.setAttribute('aria-label', etiquette);
+        champ.addEventListener('input', () => {
+          callback(nombre(champ.value));
+          calculerTotaux();
+        });
+        return champ;
+      }
+
+      function afficherLignes() {
+        const corps = document.getElementById('lignes');
+        corps.textContent = '';
+
+        lignes.forEach((ligne, index) => {
+          const rangee = document.createElement('tr');
+
+          const celluleComposante = document.createElement('td');
+          celluleComposante.appendChild(
+            creerSelection(ligne.composante, index)
+          );
+
+          const celluleQuantite = document.createElement('td');
+          celluleQuantite.appendChild(
+            creerChampNombre(
+              ligne.quantite,
+              'Quantité',
+              valeur => lignes[index].quantite = valeur,
+              '1'
+            )
+          );
+
+          const cellulePrix = document.createElement('td');
+          cellulePrix.appendChild(
+            creerChampNombre(
+              ligne.prixUnitaire,
+              'Prix unitaire',
+              valeur => lignes[index].prixUnitaire = valeur,
+              '0.01'
+            )
+          );
+
+          const celluleMontant = document.createElement('td');
+          celluleMontant.className = 'montant-ligne';
+          celluleMontant.dataset.index = index;
+
+          const celluleAction = document.createElement('td');
+          celluleAction.className = 'col-action';
+
+          const supprimer = document.createElement('button');
+          supprimer.type = 'button';
+          supprimer.className = 'supprimer';
+          supprimer.textContent = '×';
+          supprimer.title = 'Supprimer cette composante';
+          supprimer.addEventListener('click', () => {
+            lignes.splice(index, 1);
+            if (lignes.length === 0) {
+              lignes.push({
+                composante: '',
+                quantite: 1,
+                prixUnitaire: 0
+              });
+            }
+            afficherLignes();
+          });
+
+          celluleAction.appendChild(supprimer);
+          rangee.append(
+            celluleComposante,
+            celluleQuantite,
+            cellulePrix,
+            celluleMontant,
+            celluleAction
+          );
+          corps.appendChild(rangee);
+        });
+
+        document.getElementById('ajouter').disabled =
+          lignes.length >= MAX_LIGNES;
+
+        calculerTotaux();
+      }
+
+      function calculerTotaux() {
+        let total = 0;
+
+        lignes.forEach((ligne, index) => {
+          const montant = arrondir(
+            nombre(ligne.quantite) * nombre(ligne.prixUnitaire)
+          );
+          total += montant;
+
+          const cellule = document.querySelector(
+            '.montant-ligne[data-index="' + index + '"]'
+          );
+          if (cellule) {
+            cellule.textContent = formatMonetaire.format(montant);
+          }
+        });
+
+        total = arrondir(total);
+        const reste = arrondir(nombre(DONNEES.montant) - total);
+        const elementReste = document.getElementById('reste');
+        const bouton = document.getElementById('enregistrer');
+        const lignesValides = lignes.length > 0 && lignes.every(ligne =>
+          ligne.composante &&
+          nombre(ligne.quantite) > 0 &&
+          nombre(ligne.prixUnitaire) >= 0
+        );
+
+        document.getElementById('totalReparti').textContent =
+          formatMonetaire.format(total);
+        elementReste.textContent = formatMonetaire.format(reste);
+        elementReste.className =
+          Math.abs(reste) < 0.005
+            ? 'pret'
+            : reste < 0
+              ? 'depassement'
+              : 'incomplet';
+
+        bouton.disabled = !(Math.abs(reste) < 0.005 && lignesValides);
+      }
+
+      function afficherMessage(texte, type) {
+        const message = document.getElementById('message');
+        message.textContent = texte || '';
+        message.className = 'message ' + (type || '');
+      }
+
+      function enregistrer() {
+        const bouton = document.getElementById('enregistrer');
+        bouton.disabled = true;
+        bouton.textContent = 'Enregistrement…';
+        afficherMessage('', '');
+
+        const donnees = {
+          idImport: DONNEES.idImport,
+          lignes: lignes.map(ligne => ({
+            composante: ligne.composante,
+            quantite: nombre(ligne.quantite),
+            prixUnitaire: nombre(ligne.prixUnitaire)
+          }))
+        };
+
+        google.script.run
+          .withSuccessHandler(resultat => {
+            afficherMessage(resultat.message, 'succes');
+            bouton.textContent = 'Enregistrée';
+            setTimeout(() => google.script.host.close(), 1300);
+          })
+          .withFailureHandler(erreur => {
+            afficherMessage(
+              erreur && erreur.message
+                ? erreur.message
+                : 'Une erreur est survenue.',
+              'erreur'
+            );
+            bouton.textContent = 'Enregistrer et comptabiliser';
+            calculerTotaux();
+          })
+          .enregistrerEtComptabiliserTransactionMixte(donnees);
+      }
+
+      document.getElementById('date').textContent = DONNEES.date;
+      document.getElementById('description').textContent =
+        DONNEES.description;
+      document.getElementById('montantBancaire').textContent =
+        formatMonetaire.format(DONNEES.montant);
+
+      lignes = DONNEES.lignes.map(ligne => ({
+        composante: ligne.composante || '',
+        quantite: nombre(ligne.quantite || 1),
+        prixUnitaire: nombre(ligne.prixUnitaire || 0)
+      }));
+
+      document.getElementById('ajouter').addEventListener('click', () => {
+        if (lignes.length < MAX_LIGNES) {
+          lignes.push({
+            composante: '',
+            quantite: 1,
+            prixUnitaire: 0
+          });
+          afficherLignes();
+        }
+      });
+
+      document.getElementById('enregistrer').addEventListener(
+        'click',
+        enregistrer
+      );
+
+      afficherLignes();
+    </script>
+  </body>
+</html>

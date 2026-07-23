@@ -1,0 +1,2227 @@
+function installerInterfaceTransactionsMixtes() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const gestionnairesDeclencheurs = [
+    'ajouterMenuTransactionsMixtesAuDemarrage',
+    'preparerTransactionMixteDepuisBanque',
+    'ouvrirInterfaceMixteDepuisImport'
+  ];
+
+  ScriptApp.getProjectTriggers()
+    .filter(function(declencheur) {
+      return gestionnairesDeclencheurs.indexOf(
+        declencheur.getHandlerFunction()
+      ) !== -1;
+    })
+    .forEach(function(declencheur) {
+      ScriptApp.deleteTrigger(declencheur);
+    });
+
+  ScriptApp.newTrigger('ajouterMenuTransactionsMixtesAuDemarrage')
+    .forSpreadsheet(ss)
+    .onOpen()
+    .create();
+
+  ScriptApp.newTrigger('ouvrirInterfaceMixteDepuisImport')
+    .forSpreadsheet(ss)
+    .onEdit()
+    .create();
+
+  ajouterMenuTransactionsMixtesAuDemarrage();
+
+  const comptesRepares = reparerNomsComptesTransactionsMixtes_();
+  const lignesNettoyees =
+    nettoyerLignesRepartitionSansComposanteMixte_();
+
+  SpreadsheetApp.getUi().alert(
+    'L’interface de répartition est installée.\n\n' +
+    'Dès que vous choisissez « Transaction mixte » dans la colonne ' +
+    '« Mode de traitement » de l’onglet « Import bancaire », la fenêtre ' +
+    'de répartition s’ouvre sans créer de ligne à l’avance.\n\n' +
+    comptesRepares + ' nom(s) de compte réparé(s) et ' +
+    lignesNettoyees + ' ligne(s) de répartition inutile(s) nettoyée(s).'
+  );
+}
+
+function ajouterMenuTransactionsMixtesAuDemarrage() {
+  SpreadsheetApp.getUi()
+    .createMenu('Répartition')
+    .addItem(
+      'Répartir la transaction sélectionnée',
+      'ouvrirRepartitionTransactionSelectionnee'
+    )
+    .addSeparator()
+    .addItem(
+      'Annuler la transaction sélectionnée',
+      'annulerTransactionSelectionnee'
+    )
+    .addToUi();
+}
+
+function annulerTransactionSelectionnee() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const feuille = ss.getActiveSheet();
+  const cellule = feuille.getActiveCell();
+  const ui = SpreadsheetApp.getUi();
+
+  if (feuille.getName() !== 'Transactions' || cellule.getRow() < 6) {
+    ui.alert(
+      'Sélectionnez d’abord une cellule sur la transaction à annuler ' +
+      'dans l’onglet « Transactions ».'
+    );
+    return;
+  }
+
+  const valeurs = feuille
+    .getRange(cellule.getRow(), 1, 1, 17)
+    .getValues()[0];
+  const idTransaction = String(valeurs[0] || '').trim();
+  const statut = String(valeurs[14] || '').trim();
+
+  if (!idTransaction) {
+    ui.alert('La ligne sélectionnée ne contient aucune transaction.');
+    return;
+  }
+
+  if (statut === 'Annulée') {
+    ui.alert('Cette transaction est déjà annulée.');
+    return;
+  }
+
+  if (statut === 'Exemple') {
+    ui.alert('La ligne d’exemple ne peut pas être annulée.');
+    return;
+  }
+
+  const referenceBancaire = String(valeurs[13] || '').trim();
+  const transactionsCibles = obtenirTransactionsCiblesAnnulation_(
+    feuille,
+    idTransaction,
+    referenceBancaire
+  );
+  const total = arrondirMontantMixte_(
+    transactionsCibles.reduce(function(somme, transaction) {
+      return somme + Number(transaction.valeurs[5] || 0);
+    }, 0)
+  );
+  const confirmation = ui.alert(
+    'Confirmer l’annulation',
+    'Cette opération annulera ' +
+    transactionsCibles.length +
+    ' ligne(s) de transaction pour un total de ' +
+    total.toFixed(2) +
+    ' $.\n\n' +
+    'Le journal sera inversé, les forfaits et le stock seront ajustés, ' +
+    'et la transaction bancaire redeviendra « À classer ».\n\n' +
+    'Voulez-vous continuer?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (confirmation !== ui.Button.YES) {
+    return;
+  }
+
+  const resultat = annulerGroupeTransactionsOSBL_(
+    idTransaction,
+    referenceBancaire
+  );
+
+  ui.alert(
+    'Annulation terminée',
+    resultat.transactions +
+    ' transaction(s) annulée(s), ' +
+    resultat.ecritures +
+    ' écriture(s) d’annulation créée(s), ' +
+    resultat.forfaits +
+    ' forfait(s) annulé(s) et ' +
+    resultat.mouvementsInventaire +
+    ' mouvement(s) de stock restauré(s).',
+    ui.ButtonSet.OK
+  );
+}
+
+function obtenirTransactionsCiblesAnnulation_(
+  transactions,
+  idTransaction,
+  referenceBancaire
+) {
+  const derniereLigne = transactions.getLastRow();
+
+  if (derniereLigne < 6) {
+    throw new Error('L’onglet « Transactions » est vide.');
+  }
+
+  const valeurs = transactions
+    .getRange(6, 1, derniereLigne - 5, 17)
+    .getValues();
+  const cibles = [];
+
+  valeurs.forEach(function(ligne, index) {
+    const id = String(ligne[0] || '').trim();
+    const reference = String(ligne[13] || '').trim();
+    const statut = String(ligne[14] || '').trim();
+    const correspond =
+      referenceBancaire
+        ? reference === referenceBancaire
+        : id === idTransaction;
+
+    if (
+      correspond &&
+      id &&
+      statut !== 'Annulée' &&
+      statut !== 'Exemple'
+    ) {
+      cibles.push({
+        numero: index + 6,
+        valeurs: ligne
+      });
+    }
+  });
+
+  if (cibles.length === 0) {
+    throw new Error(
+      'Aucune transaction active n’a été trouvée pour cette sélection.'
+    );
+  }
+
+  return cibles;
+}
+
+function annulerGroupeTransactionsOSBL_(
+  idTransaction,
+  referenceBancaire
+) {
+  const verrou = LockService.getDocumentLock();
+
+  if (!verrou.tryLock(30000)) {
+    throw new Error(
+      'Une autre opération est en cours. Attendez quelques secondes et réessayez.'
+    );
+  }
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const transactions = obtenirFeuilleMixte_(ss, 'Transactions');
+    const journal = obtenirFeuilleMixte_(ss, 'Journal');
+    const forfaits = obtenirFeuilleMixte_(ss, 'Forfaits');
+    const repartition = obtenirFeuilleMixte_(ss, 'Répartition');
+    const inventaire = obtenirFeuilleMixte_(ss, 'Inventaire');
+    const importBancaire = obtenirFeuilleMixte_(
+      ss,
+      'Import bancaire'
+    );
+    const cibles = obtenirTransactionsCiblesAnnulation_(
+      transactions,
+      idTransaction,
+      referenceBancaire
+    );
+    const ids = {};
+
+    cibles.forEach(function(transaction) {
+      ids[String(transaction.valeurs[0] || '').trim()] = true;
+    });
+
+    const restaurationInventaire =
+      preparerRestaurationInventaireAnnulation_(
+        repartition,
+        inventaire,
+        referenceBancaire
+      );
+    const ecritures = creerEcrituresAnnulationJournal_(
+      journal,
+      ids
+    );
+    const horodatage = Utilities.formatDate(
+      new Date(),
+      ss.getSpreadsheetTimeZone(),
+      'yyyy-MM-dd HH:mm'
+    );
+
+    cibles.forEach(function(transaction) {
+      transactions
+        .getRange(transaction.numero, 15)
+        .setValue('Annulée')
+        .setNote('Annulée le ' + horodatage);
+    });
+
+    const forfaitsAnnules = annulerForfaitsParReference_(
+      forfaits,
+      referenceBancaire,
+      horodatage
+    );
+
+    appliquerRestaurationInventaireAnnulation_(
+      inventaire,
+      restaurationInventaire
+    );
+
+    marquerRepartitionAnnulee_(
+      repartition,
+      referenceBancaire,
+      horodatage
+    );
+
+    remettreImportBancaireAClasser_(
+      importBancaire,
+      referenceBancaire,
+      horodatage
+    );
+
+    SpreadsheetApp.flush();
+
+    return {
+      transactions: cibles.length,
+      ecritures: ecritures,
+      forfaits: forfaitsAnnules,
+      mouvementsInventaire: restaurationInventaire.length
+    };
+  } finally {
+    verrou.releaseLock();
+  }
+}
+
+function creerEcrituresAnnulationJournal_(journal, idsTransactions) {
+  const derniereLigne = journal.getLastRow();
+
+  if (derniereLigne < 6) {
+    throw new Error(
+      'Aucune écriture de journal n’a été trouvée pour cette transaction.'
+    );
+  }
+
+  const valeurs = journal
+    .getRange(6, 1, derniereLigne - 5, 13)
+    .getValues();
+  const idsEcrituresExistantes = {};
+  const ecrituresAInverser = [];
+
+  valeurs.forEach(function(ligne) {
+    const idEcriture = String(ligne[0] || '').trim();
+    const idTransaction = String(ligne[1] || '').trim();
+
+    if (idEcriture) {
+      idsEcrituresExistantes[idEcriture] = true;
+    }
+
+    if (
+      idsTransactions[idTransaction] &&
+      idEcriture &&
+      idEcriture.indexOf('ANN-') !== 0
+    ) {
+      ecrituresAInverser.push(ligne);
+    }
+  });
+
+  if (ecrituresAInverser.length === 0) {
+    throw new Error(
+      'Aucune écriture active n’a été trouvée dans « Journal ».'
+    );
+  }
+
+  ecrituresAInverser.forEach(function(ligneSource) {
+    const idEcritureSource = String(ligneSource[0] || '').trim();
+    const idAnnulation = 'ANN-' + idEcritureSource;
+
+    if (idsEcrituresExistantes[idAnnulation]) {
+      throw new Error(
+        'Une écriture d’annulation existe déjà pour ' +
+        idEcritureSource +
+        '.'
+      );
+    }
+  });
+
+  ecrituresAInverser.forEach(function(ligneSource) {
+    const ligneCible = prochaineLigneVideMixte_(journal, 6);
+    const cible = journal.getRange(ligneCible, 1, 1, 13);
+
+    journal
+      .getRange(6, 1, 1, 13)
+      .copyTo(
+        cible,
+        SpreadsheetApp.CopyPasteType.PASTE_FORMAT,
+        false
+      );
+
+    cible.setValues([[
+      'ANN-' + String(ligneSource[0] || '').trim(),
+      String(ligneSource[1] || '').trim(),
+      ligneSource[2],
+      String(ligneSource[3] || '').trim(),
+      ligneSource[4],
+      ligneSource[5],
+      arrondirMontantMixte_(Number(ligneSource[7] || 0)),
+      arrondirMontantMixte_(Number(ligneSource[6] || 0)),
+      ligneSource[8],
+      ligneSource[9],
+      'Annulation – ' + String(ligneSource[10] || '').trim(),
+      ligneSource[11],
+      'Oui'
+    ]]);
+
+    cible
+      .getCell(1, 4)
+      .setNumberFormat('@')
+      .setValue(String(ligneSource[3] || '').trim());
+  });
+
+  return ecrituresAInverser.length;
+}
+
+function annulerForfaitsParReference_(
+  forfaits,
+  referenceBancaire,
+  horodatage
+) {
+  if (!referenceBancaire || forfaits.getLastRow() < 6) {
+    return 0;
+  }
+
+  const valeurs = forfaits
+    .getRange(6, 1, forfaits.getLastRow() - 5, 10)
+    .getValues();
+  let compteur = 0;
+
+  valeurs.forEach(function(ligne, index) {
+    const reference = String(ligne[5] || '').trim();
+    const statut = String(ligne[8] || '').trim();
+
+    if (
+      reference === referenceBancaire &&
+      statut !== 'Annulé' &&
+      statut !== 'Remboursé'
+    ) {
+      const numero = index + 6;
+      const notes = String(ligne[9] || '').trim();
+
+      forfaits.getRange(numero, 9).setValue('Annulé');
+      forfaits
+        .getRange(numero, 10)
+        .setValue(
+          notes +
+          (notes ? ' | ' : '') +
+          'Transaction annulée le ' +
+          horodatage
+        );
+      compteur += 1;
+    }
+  });
+
+  return compteur;
+}
+
+function preparerRestaurationInventaireAnnulation_(
+  repartition,
+  inventaire,
+  referenceBancaire
+) {
+  if (!referenceBancaire) {
+    return [];
+  }
+
+  const correspondances = {
+    'T-shirt': 'MERCH-TS-NOIR',
+    'Chandail à manches longues': 'MERCH-LS-NOIR',
+    'Hoodie': 'MERCH-HD-NOIR'
+  };
+  const lignesRepartition = lireLignesRepartitionMixte_(
+    repartition,
+    referenceBancaire
+  );
+  const quantites = {};
+
+  lignesRepartition.forEach(function(ligne) {
+    const composante = String(ligne.valeurs[5] || '').trim();
+    const marqueur = String(ligne.valeurs[16] || '').trim();
+    const ugs = correspondances[composante];
+
+    if (ugs && marqueur.indexOf('Annulée') !== 0) {
+      quantites[ugs] =
+        Number(quantites[ugs] || 0) +
+        Number(ligne.valeurs[6] || 0);
+    }
+  });
+
+  if (Object.keys(quantites).length === 0) {
+    return [];
+  }
+
+  const valeursInventaire = inventaire
+    .getRange(6, 1, inventaire.getLastRow() - 5, 6)
+    .getValues();
+  const mouvements = [];
+
+  Object.keys(quantites).forEach(function(ugs) {
+    let trouve = false;
+
+    valeursInventaire.forEach(function(ligne, index) {
+      if (String(ligne[0] || '').trim() === ugs) {
+        const ventesActuelles = Number(ligne[5] || 0);
+        const quantite = Number(quantites[ugs] || 0);
+
+        if (ventesActuelles < quantite) {
+          throw new Error(
+            'Impossible de restaurer ' +
+            quantite +
+            ' unité(s) de ' +
+            ugs +
+            ' : seulement ' +
+            ventesActuelles +
+            ' vente(s) sont inscrites dans « Inventaire ».'
+          );
+        }
+
+        mouvements.push({
+          ligne: index + 6,
+          ventesApresAnnulation: ventesActuelles - quantite
+        });
+        trouve = true;
+      }
+    });
+
+    if (!trouve) {
+      throw new Error(
+        'L’article ' + ugs + ' est introuvable dans « Inventaire ».'
+      );
+    }
+  });
+
+  return mouvements;
+}
+
+function appliquerRestaurationInventaireAnnulation_(
+  inventaire,
+  mouvements
+) {
+  mouvements.forEach(function(mouvement) {
+    inventaire
+      .getRange(mouvement.ligne, 6)
+      .setValue(mouvement.ventesApresAnnulation);
+  });
+}
+
+function marquerRepartitionAnnulee_(
+  repartition,
+  referenceBancaire,
+  horodatage
+) {
+  if (!referenceBancaire) {
+    return;
+  }
+
+  if (!String(repartition.getRange(5, 17).getValue() || '').trim()) {
+    repartition.getRange(5, 17).setValue('Synchronisation');
+  }
+
+  lireLignesRepartitionMixte_(
+    repartition,
+    referenceBancaire
+  ).forEach(function(ligne) {
+    repartition
+      .getRange(ligne.numero, 17)
+      .setValue('Annulée – ' + horodatage);
+  });
+}
+
+function remettreImportBancaireAClasser_(
+  importBancaire,
+  referenceBancaire,
+  horodatage
+) {
+  if (!referenceBancaire) {
+    return;
+  }
+
+  const ligne = trouverLigneParValeurMixte_(
+    importBancaire,
+    1,
+    referenceBancaire,
+    6
+  );
+
+  if (!ligne) {
+    throw new Error(
+      'La référence bancaire ' +
+      referenceBancaire +
+      ' est introuvable dans « Import bancaire ».'
+    );
+  }
+
+  const noteActuelle = String(
+    importBancaire.getRange(ligne, 13).getValue() || ''
+  ).trim();
+  const parties = noteActuelle
+    .split('|')
+    .map(function(partie) {
+      return partie.trim();
+    })
+    .filter(function(partie) {
+      return (
+        partie &&
+        partie.indexOf('Transaction mixte enregistrée :') !== 0
+      );
+    });
+
+  parties.push('Transaction annulée le ' + horodatage);
+
+  importBancaire.getRange(ligne, 8, 1, 3).clearContent();
+  importBancaire.getRange(ligne, 11).setValue('À classer');
+  importBancaire.getRange(ligne, 13).setValue(parties.join(' | '));
+  importBancaire.getRange(ligne, 15).clearContent();
+}
+
+function ouvrirRepartitionTransactionSelectionnee() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const feuille = ss.getActiveSheet();
+  const cellule = feuille.getActiveCell();
+
+  if (feuille.getName() !== 'Import bancaire' || cellule.getRow() < 6) {
+    SpreadsheetApp.getUi().alert(
+      'Sélectionnez d’abord une cellule sur la transaction voulue dans l’onglet « Import bancaire ».'
+    );
+    return;
+  }
+
+  ouvrirRepartitionPourLigneMixte_(cellule.getRow());
+}
+
+function ouvrirInterfaceMixteDepuisImport(e) {
+  if (!e || !e.range) {
+    return;
+  }
+
+  const plage = e.range;
+  const feuille = plage.getSheet();
+
+  if (
+    feuille.getName() !== 'Import bancaire' ||
+    plage.getRow() < 6 ||
+    plage.getColumn() !== 15 ||
+    plage.getNumRows() !== 1 ||
+    plage.getNumColumns() !== 1 ||
+    String(e.value || '').trim() !== 'Transaction mixte'
+  ) {
+    return;
+  }
+
+  try {
+    ouvrirRepartitionPourLigneMixte_(plage.getRow());
+  } catch (erreur) {
+    const message = erreur && erreur.message
+      ? erreur.message
+      : String(erreur);
+
+    (e.source || SpreadsheetApp.getActiveSpreadsheet()).toast(
+      message +
+      ' Utilisez le menu « Répartition » si la fenêtre ne s’est pas ouverte.',
+      'Répartition',
+      10
+    );
+  }
+}
+
+function ouvrirRepartitionPourLigneMixte_(ligneImport) {
+  const donnees = obtenirDonneesInterfaceMixte_(ligneImport);
+  const modele = HtmlService.createTemplateFromFile('RepartitionMixte');
+  modele.donnees = JSON.stringify(donnees);
+
+  SpreadsheetApp.getUi().showModalDialog(
+    modele.evaluate()
+      .setWidth(840)
+      .setHeight(610),
+    'Répartir une transaction bancaire'
+  );
+}
+
+function obtenirDonneesInterfaceMixte_(ligneImport) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const importBancaire = obtenirFeuilleMixte_(ss, 'Import bancaire');
+  const repartition = obtenirFeuilleMixte_(ss, 'Répartition');
+  const valeurs = importBancaire
+    .getRange(ligneImport, 1, 1, 15)
+    .getValues()[0];
+
+  const idImport = String(valeurs[0] || '').trim();
+  const statut = String(valeurs[10] || '').trim();
+  const idTransaction = String(valeurs[9] || '').trim();
+  const montant = Number(valeurs[3] || 0);
+
+  if (!idImport) {
+    throw new Error('La ligne sélectionnée ne contient aucune transaction.');
+  }
+
+  if (statut === 'Classée' || idTransaction) {
+    throw new Error(
+      'Cette transaction est déjà classée' +
+      (idTransaction ? ' sous ' + idTransaction : '') +
+      '.'
+    );
+  }
+
+  if (montant <= 0) {
+    throw new Error(
+      'Cette première version de l’interface sert aux ventes et autres revenus positifs.'
+    );
+  }
+
+  const options = construireOptionsComposantesMixtes_(
+    ss,
+    valeurs[1]
+  );
+
+  const lignesExistantes = lireLignesRepartitionMixte_(
+    repartition,
+    idImport
+  )
+    .filter(function(ligne) {
+      return String(ligne.valeurs[5] || '').trim() !== '';
+    })
+    .map(function(ligne) {
+      return {
+        composante: String(ligne.valeurs[5] || '').trim(),
+        quantite: Number(ligne.valeurs[6] || 1),
+        prixUnitaire: Number(ligne.valeurs[7] || 0)
+      };
+    });
+
+  return {
+    idImport: idImport,
+    date: Utilities.formatDate(
+      valeurs[1],
+      ss.getSpreadsheetTimeZone(),
+      'yyyy-MM-dd'
+    ),
+    description: String(valeurs[2] || '').trim(),
+    montant: arrondirMontantMixte_(montant),
+    options: options,
+    lignes: lignesExistantes.length
+      ? lignesExistantes
+      : [{ composante: '', quantite: 1, prixUnitaire: 0 }]
+  };
+}
+
+function construireOptionsComposantesMixtes_(ss, dateTransaction) {
+  const inventaire = obtenirFeuilleMixte_(ss, 'Inventaire');
+  const configuration = obtenirFeuilleMixte_(ss, 'Configuration');
+  const annee = dateTransaction instanceof Date
+    ? dateTransaction.getFullYear()
+    : new Date(dateTransaction).getFullYear();
+
+  const prixInventaire = {};
+  const derniereLigneInventaire = inventaire.getLastRow();
+
+  if (derniereLigneInventaire >= 6) {
+    inventaire
+      .getRange(6, 1, derniereLigneInventaire - 5, 11)
+      .getValues()
+      .forEach(function(ligne) {
+        prixInventaire[String(ligne[0] || '').trim()] =
+          Number(ligne[10] || 0);
+      });
+  }
+
+  let prixCombine = annee >= 2027 ? 50 : 45;
+  const tarifs = configuration.getRange('P6:S20').getValues();
+
+  tarifs.some(function(ligne) {
+    if (Number(ligne[0]) === annee) {
+      prixCombine = Number(ligne[3] || prixCombine);
+      return true;
+    }
+    return false;
+  });
+
+  return [
+    { valeur: 'Entrée – Pion joues-tu?', prix: 10 },
+    { valeur: 'Entrée – Cartier', prix: 2 },
+    { valeur: 'Forfait Pion joues-tu?', prix: 30 },
+    { valeur: 'Forfait Cartier', prix: 20 },
+    { valeur: 'Forfait combiné', prix: prixCombine },
+    {
+      valeur: 'T-shirt',
+      prix: Number(prixInventaire['MERCH-TS-NOIR'] || 25)
+    },
+    {
+      valeur: 'Chandail à manches longues',
+      prix: Number(prixInventaire['MERCH-LS-NOIR'] || 30)
+    },
+    {
+      valeur: 'Hoodie',
+      prix: Number(prixInventaire['MERCH-HD-NOIR'] || 50)
+    }
+  ];
+}
+
+function enregistrerEtComptabiliserTransactionMixte(donnees) {
+  const verrou = LockService.getDocumentLock();
+
+  if (!verrou.tryLock(30000)) {
+    throw new Error(
+      'Une autre opération est en cours. Attendez quelques secondes et réessayez.'
+    );
+  }
+
+  try {
+    if (!donnees || !donnees.idImport || !Array.isArray(donnees.lignes)) {
+      throw new Error('Les données reçues sont incomplètes.');
+    }
+
+    const lignes = donnees.lignes
+      .map(function(ligne) {
+        return {
+          composante: String(ligne.composante || '').trim(),
+          quantite: Number(ligne.quantite || 0),
+          prixUnitaire: Number(ligne.prixUnitaire || 0)
+        };
+      })
+      .filter(function(ligne) {
+        return ligne.composante !== '';
+      });
+
+    if (lignes.length === 0 || lignes.length > 5) {
+      throw new Error(
+        'La transaction doit contenir entre une et cinq composantes.'
+      );
+    }
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const importBancaire = obtenirFeuilleMixte_(ss, 'Import bancaire');
+    const repartition = obtenirFeuilleMixte_(ss, 'Répartition');
+    const ligneImport = trouverLigneParValeurMixte_(
+      importBancaire,
+      1,
+      donnees.idImport,
+      6
+    );
+
+    if (!ligneImport) {
+      throw new Error('La transaction bancaire est introuvable.');
+    }
+
+    const valeursImport = importBancaire
+      .getRange(ligneImport, 1, 1, 15)
+      .getValues()[0];
+
+    const montantBancaire = arrondirMontantMixte_(
+      Number(valeursImport[3] || 0)
+    );
+    const totalSaisi = arrondirMontantMixte_(
+      lignes.reduce(function(total, ligne) {
+        return total + ligne.quantite * ligne.prixUnitaire;
+      }, 0)
+    );
+
+    if (Math.abs(montantBancaire - totalSaisi) >= 0.005) {
+      throw new Error(
+        'Le total saisi (' +
+        totalSaisi.toFixed(2) +
+        ' $) doit correspondre au montant bancaire (' +
+        montantBancaire.toFixed(2) +
+        ' $).'
+      );
+    }
+
+    enregistrerRepartitionTechniqueMixte_(
+      repartition,
+      valeursImport,
+      lignes
+    );
+
+    const resultat = finaliserTransactionMixteParId_(
+      String(donnees.idImport).trim()
+    );
+
+    return {
+      succes: true,
+      idGroupe: resultat.idGroupe,
+      message:
+        'Transaction enregistrée et comptabilisée sous ' +
+        resultat.idGroupe +
+        '.'
+    };
+  } finally {
+    verrou.releaseLock();
+  }
+}
+
+function enregistrerRepartitionTechniqueMixte_(
+  feuille,
+  valeursImport,
+  lignes
+) {
+  const idImport = String(valeursImport[0] || '').trim();
+  const lignesExistantes = lireLignesRepartitionMixte_(
+    feuille,
+    idImport
+  );
+
+  lignesExistantes.forEach(function(ligneExistante) {
+    feuille
+      .getRange(ligneExistante.numero, 1, 1, 17)
+      .clearContent();
+  });
+
+  SpreadsheetApp.flush();
+
+  const debut = trouverBlocVideRepartitionMixte_(
+    feuille,
+    lignes.length
+  );
+
+  const options = [
+    'Entrée – Pion joues-tu?',
+    'Entrée – Cartier',
+    'Forfait Pion joues-tu?',
+    'Forfait Cartier',
+    'Forfait combiné',
+    'T-shirt',
+    'Chandail à manches longues',
+    'Hoodie'
+  ];
+
+  const validation = SpreadsheetApp.newDataValidation()
+    .requireValueInList(options, true)
+    .setAllowInvalid(false)
+    .build();
+  const derniereLigneRepartition = feuille.getMaxRows();
+
+  for (let index = 0; index < lignes.length; index += 1) {
+    const numero = debut + index;
+    const ligne = lignes[index];
+
+    feuille.getRange(numero, 1, 1, 8).setValues([[
+      idImport,
+      valeursImport[1],
+      valeursImport[2],
+      Number(valeursImport[3] || 0),
+      index + 1,
+      ligne.composante,
+      ligne.quantite,
+      ligne.prixUnitaire
+    ]]);
+
+    feuille.getRange(numero, 6).setDataValidation(validation);
+    feuille.getRange(numero, 9).setFormula(
+      '=IF(OR($A' + numero + '="",$F' + numero + '=""),"",$G' +
+      numero + '*$H' + numero + ')'
+    );
+    feuille.getRange(numero, 10).setFormula(
+      '=IF($A' + numero + '="","",IF(OR($F' + numero +
+      '="Entrée – Pion joues-tu?",$F' + numero +
+      '="Entrée – Cartier"),"Revenus d\'entrées aux événements",IF(OR($F' +
+      numero + '="Forfait Pion joues-tu?",$F' + numero +
+      '="Forfait Cartier",$F' + numero +
+      '="Forfait combiné"),"Revenus de laissez-passer et forfaits",IF(OR($F' +
+      numero + '="T-shirt",$F' + numero +
+      '="Chandail à manches longues",$F' + numero +
+      '="Hoodie"),"Ventes de marchandises et de jeux",""))))'
+    );
+    feuille.getRange(numero, 11).setFormula(
+      '=IF($A' + numero + '="","",IF(OR($F' + numero +
+      '="Entrée – Pion joues-tu?",$F' + numero +
+      '="Forfait Pion joues-tu?"),"Pion joues-tu?",IF(OR($F' +
+      numero + '="Entrée – Cartier",$F' + numero +
+      '="Forfait Cartier"),"Pion joues-tu? – Cartier",IF(OR($F' +
+      numero + '="T-shirt",$F' + numero +
+      '="Chandail à manches longues",$F' + numero +
+      '="Hoodie"),"Marchandise",""))))'
+    );
+    feuille.getRange(numero, 12).setFormula(
+      '=IF($K' + numero + '="Pion joues-tu?","PJT-2026",IF($K' +
+      numero + '="Pion joues-tu? – Cartier","PJC-2026",""))'
+    );
+    feuille.getRange(numero, 13).setFormula(
+      '=IF($A' + numero + '="","",SUMIF($A$6:$A$' +
+      derniereLigneRepartition + ',$A' + numero +
+      ',$I$6:$I$' + derniereLigneRepartition + '))'
+    );
+    feuille.getRange(numero, 14).setFormula(
+      '=IF($A' + numero + '="","",$D' + numero + '-$M' + numero + ')'
+    );
+    feuille.getRange(numero, 15).setFormula(
+      '=IF($A' + numero + '="","",IF(ABS($N' + numero +
+      ')<0.005,"Prêt",IF($N' + numero +
+      '<0,"Dépassement","À compléter")))'
+    );
+  }
+
+  importBancaireModeMixte_(valeursImport[0]);
+  SpreadsheetApp.flush();
+}
+
+function nettoyerLignesRepartitionSansComposanteMixte_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const feuille = obtenirFeuilleMixte_(ss, 'Répartition');
+  const derniereLigne = feuille.getMaxRows();
+
+  if (derniereLigne < 6) {
+    return 0;
+  }
+
+  const valeurs = feuille
+    .getRange(6, 1, derniereLigne - 5, 6)
+    .getDisplayValues();
+  let compteur = 0;
+
+  valeurs.forEach(function(ligne, index) {
+    const idImport = String(ligne[0] || '').trim();
+    const composante = String(ligne[5] || '').trim();
+
+    if (idImport && !composante) {
+      feuille.getRange(index + 6, 1, 1, 17).clearContent();
+      compteur += 1;
+    }
+  });
+
+  if (compteur) {
+    SpreadsheetApp.flush();
+  }
+
+  return compteur;
+}
+
+function trouverBlocVideRepartitionMixte_(feuille, taille) {
+  const maximum = feuille.getMaxRows();
+  const ids = feuille
+    .getRange(6, 1, maximum - 5, 1)
+    .getDisplayValues();
+  let consecutives = 0;
+
+  for (let index = 0; index < ids.length; index += 1) {
+    if (String(ids[index][0] || '').trim() === '') {
+      consecutives += 1;
+      if (consecutives === taille) {
+        return index + 7 - taille;
+      }
+    } else {
+      consecutives = 0;
+    }
+  }
+
+  feuille.insertRowsAfter(maximum, taille);
+  return maximum + 1;
+}
+
+function importBancaireModeMixte_(idImport) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const feuille = obtenirFeuilleMixte_(ss, 'Import bancaire');
+  const ligne = trouverLigneParValeurMixte_(feuille, 1, idImport, 6);
+
+  if (ligne) {
+    feuille.getRange(ligne, 15).setValue('Transaction mixte');
+  }
+}
+
+function finaliserTransactionMixteParId_(idImport) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const repartition = obtenirFeuilleMixte_(ss, 'Répartition');
+  const importBancaire = obtenirFeuilleMixte_(ss, 'Import bancaire');
+  const transactions = obtenirFeuilleMixte_(ss, 'Transactions');
+  const journal = obtenirFeuilleMixte_(ss, 'Journal');
+  const forfaits = obtenirFeuilleMixte_(ss, 'Forfaits');
+  const inventaire = obtenirFeuilleMixte_(ss, 'Inventaire');
+  const configuration = obtenirFeuilleMixte_(ss, 'Configuration');
+
+  SpreadsheetApp.flush();
+
+  const ligneImport = trouverLigneParValeurMixte_(
+    importBancaire,
+    1,
+    idImport,
+    6
+  );
+
+  if (!ligneImport) {
+    throw new Error(
+      'La transaction ' + idImport + ' est introuvable dans « Import bancaire ».'
+    );
+  }
+
+  const valeursImport = importBancaire
+    .getRange(ligneImport, 1, 1, 15)
+    .getValues()[0];
+
+  const idDejaLie = String(valeursImport[9] || '').trim();
+  const statutImport = String(valeursImport[10] || '').trim();
+
+  if (idDejaLie || statutImport === 'Classée') {
+    throw new Error(
+      'Cette transaction bancaire est déjà classée' +
+      (idDejaLie ? ' sous ' + idDejaLie : '') +
+      '.'
+    );
+  }
+
+  const idGroupeBase = creerIdGroupeMixte_(idImport);
+
+  nettoyerTraitementPartielMixte_(
+    transactions,
+    journal,
+    forfaits,
+    idImport,
+    idGroupeBase
+  );
+
+  if (transactionBancaireDejaPresenteMixte_(transactions, idImport)) {
+    throw new Error(
+      'Une transaction comptable utilise déjà la référence bancaire ' +
+      idImport +
+      '.'
+    );
+  }
+
+  const idGroupe = creerIdGroupeDisponibleMixte_(
+    transactions,
+    idImport
+  );
+
+  const lignesRepartition = lireLignesRepartitionMixte_(
+    repartition,
+    idImport
+  );
+
+  if (lignesRepartition.length === 0) {
+    throw new Error(
+      'Aucune ligne de répartition n’a été trouvée pour ' + idImport + '.'
+    );
+  }
+
+  const lignesActives = lignesRepartition.filter(function(ligne) {
+    return String(ligne.valeurs[5] || '').trim() !== '';
+  });
+
+  if (lignesActives.length === 0) {
+    throw new Error('Aucune composante n’a été sélectionnée.');
+  }
+
+  const totalBancaire = arrondirMontantMixte_(
+    Number(valeursImport[3] || 0)
+  );
+
+  if (totalBancaire <= 0) {
+    throw new Error(
+      'La finalisation automatique gère actuellement les revenus positifs seulement.'
+    );
+  }
+
+  lignesActives.forEach(function(ligne) {
+    const composante = String(ligne.valeurs[5] || '').trim();
+    const quantite = Number(ligne.valeurs[6] || 0);
+    const prixUnitaire = Number(ligne.valeurs[7] || 0);
+    const montant = Number(ligne.valeurs[8] || 0);
+
+    if (!composante || quantite <= 0 || prixUnitaire < 0 || montant <= 0) {
+      throw new Error(
+        'La ligne ' +
+        ligne.numero +
+        ' contient une quantité, un prix ou un montant invalide.'
+      );
+    }
+  });
+
+  const totalReparti = arrondirMontantMixte_(
+    lignesActives.reduce(function(total, ligne) {
+      return total + Number(ligne.valeurs[8] || 0);
+    }, 0)
+  );
+
+  if (Math.abs(totalBancaire - totalReparti) >= 0.005) {
+    throw new Error(
+      'Le total réparti (' +
+      totalReparti.toFixed(2) +
+      ' $) ne correspond pas au montant bancaire (' +
+      totalBancaire.toFixed(2) +
+      ' $).'
+    );
+  }
+
+  const statutRepartition = String(
+    lignesRepartition[0].valeurs[14] || ''
+  ).trim();
+
+  if (statutRepartition !== 'Prêt') {
+    throw new Error(
+      'Le statut de la répartition doit être « Prêt » avant l’enregistrement.'
+    );
+  }
+
+  const planComptable = chargerPlanComptableMixte_(configuration);
+  verifierComptesRequisMixte_(planComptable);
+
+  const mouvementsInventaire = preparerMouvementsInventaireMixte_(
+    inventaire,
+    lignesActives
+  );
+
+  const dateTransaction = valeursImport[1];
+  const descriptionBancaire = String(valeursImport[2] || '').trim();
+  const acheteur = extraireNomInteracMixte_(descriptionBancaire);
+  const ecrituresComptables = developperEcrituresComptablesMixtes_(
+    lignesActives
+  );
+  const transactionParLigne = {};
+
+  ecrituresComptables.forEach(function(ecriture, index) {
+    const idTransaction =
+      idGroupe + '-' + String(index + 1).padStart(2, '0');
+
+    ecrireTransactionMixte_(
+      transactions,
+      idTransaction,
+      dateTransaction,
+      acheteur,
+      ecriture.description,
+      ecriture.montant,
+      ecriture.codeCompte,
+      ecriture.programme,
+      ecriture.projet,
+      idImport
+    );
+
+    ecrirePaireJournalRevenuMixte_(
+      journal,
+      planComptable,
+      idTransaction,
+      dateTransaction,
+      ecriture
+    );
+
+    transactionParLigne[ecriture.numeroLigneSource] = idTransaction;
+  });
+
+  lignesActives.forEach(function(ligne) {
+    const composante = String(ligne.valeurs[5] || '').trim();
+
+    if (estForfaitMixte_(composante)) {
+      creerForfaitDepuisRepartitionMixte_(
+        forfaits,
+        dateTransaction,
+        acheteur,
+        composante,
+        Number(ligne.valeurs[8] || 0),
+        idImport
+      );
+    }
+  });
+
+  mouvementsInventaire.forEach(function(mouvement) {
+    const idTransaction =
+      transactionParLigne[mouvement.numeroLigneSource];
+
+    ecrirePaireJournalCoutMixte_(
+      journal,
+      planComptable,
+      idTransaction,
+      dateTransaction,
+      mouvement
+    );
+  });
+
+  appliquerMouvementsInventaireMixte_(
+    inventaire,
+    mouvementsInventaire
+  );
+
+  const ancienneNote = String(valeursImport[12] || '').trim();
+  const nouvelleNote =
+    (ancienneNote ? ancienneNote + ' | ' : '') +
+    'Transaction mixte enregistrée : ' +
+    idGroupe;
+
+  importBancaire.getRange(ligneImport, 8, 1, 2).clearContent();
+  importBancaire.getRange(ligneImport, 10).setValue(idGroupe);
+  importBancaire.getRange(ligneImport, 11).setValue('Classée');
+  importBancaire.getRange(ligneImport, 13).setValue(nouvelleNote);
+
+  SpreadsheetApp.flush();
+
+  return {
+    idGroupe: idGroupe
+  };
+}
+
+function developperEcrituresComptablesMixtes_(lignesActives) {
+  const definitions = {
+    'Entrée – Pion joues-tu?': {
+      codeCompte: '4000',
+      programme: 'Pion joues-tu?',
+      projet: 'PJT-2026'
+    },
+    'Entrée – Cartier': {
+      codeCompte: '4000',
+      programme: 'Pion joues-tu? – Cartier',
+      projet: 'PJC-2026'
+    },
+    'Forfait Pion joues-tu?': {
+      codeCompte: '4010',
+      programme: 'Pion joues-tu?',
+      projet: 'PJT-2026'
+    },
+    'Forfait Cartier': {
+      codeCompte: '4010',
+      programme: 'Pion joues-tu? – Cartier',
+      projet: 'PJC-2026'
+    },
+    'T-shirt': {
+      codeCompte: '4020',
+      programme: 'Marchandise',
+      projet: ''
+    },
+    'Chandail à manches longues': {
+      codeCompte: '4020',
+      programme: 'Marchandise',
+      projet: ''
+    },
+    'Hoodie': {
+      codeCompte: '4020',
+      programme: 'Marchandise',
+      projet: ''
+    }
+  };
+
+  const resultat = [];
+
+  lignesActives.forEach(function(ligne) {
+    const composante = String(ligne.valeurs[5] || '').trim();
+    const montant = arrondirMontantMixte_(
+      Number(ligne.valeurs[8] || 0)
+    );
+
+    if (composante === 'Forfait combiné') {
+      const partPion = arrondirMontantMixte_(montant * 0.6);
+      const partCartier = arrondirMontantMixte_(montant - partPion);
+
+      resultat.push({
+        numeroLigneSource: ligne.numero,
+        description: 'Forfait combiné – part Pion joues-tu?',
+        montant: partPion,
+        codeCompte: '4010',
+        programme: 'Pion joues-tu?',
+        projet: 'PJT-2026'
+      });
+
+      resultat.push({
+        numeroLigneSource: ligne.numero,
+        description: 'Forfait combiné – part Cartier',
+        montant: partCartier,
+        codeCompte: '4010',
+        programme: 'Pion joues-tu? – Cartier',
+        projet: 'PJC-2026'
+      });
+
+      return;
+    }
+
+    const definition = definitions[composante];
+
+    if (!definition) {
+      throw new Error(
+        'La composante « ' + composante + ' » n’est pas reconnue.'
+      );
+    }
+
+    resultat.push({
+      numeroLigneSource: ligne.numero,
+      description: composante,
+      montant: montant,
+      codeCompte: definition.codeCompte,
+      programme: definition.programme,
+      projet: definition.projet
+    });
+  });
+
+  return resultat;
+}
+
+function ecrireTransactionMixte_(
+  feuille,
+  idTransaction,
+  dateTransaction,
+  contact,
+  description,
+  montant,
+  codeCompte,
+  programme,
+  projet,
+  idImport
+) {
+  const compte = obtenirCompteConfigurationMixte_(codeCompte);
+  const ligne = prochaineLigneVideMixte_(feuille, 6);
+  const modele = feuille.getRange(6, 1, 1, 17);
+  const cible = feuille.getRange(ligne, 1, 1, 17);
+
+  modele.copyTo(
+    cible,
+    SpreadsheetApp.CopyPasteType.PASTE_FORMAT,
+    false
+  );
+  modele.copyTo(
+    cible,
+    SpreadsheetApp.CopyPasteType.PASTE_DATA_VALIDATION,
+    false
+  );
+
+  const formuleMois =
+    '=IF($B' + ligne + '="","",TEXT($B' + ligne + ',"yyyy-mm"))';
+
+  const formuleControlePiece =
+    '=IF($A' +
+    ligne +
+    '="","",IF($O' +
+    ligne +
+    '="Exemple","Ignorée",IF(AND($C' +
+    ligne +
+    '="Dépense",$L' +
+    ligne +
+    '=""),"Pièce requise","OK")))';
+
+  cible.setValues([[
+    idTransaction,
+    dateTransaction,
+    'Revenu',
+    contact,
+    description,
+    arrondirMontantMixte_(montant),
+    compte.valeurCode,
+    compte.nom,
+    programme,
+    projet,
+    '1000',
+    '',
+    'Import',
+    idImport,
+    'Validée',
+    formuleMois,
+    formuleControlePiece
+  ]]);
+
+  cible
+    .getCell(1, 7)
+    .setNumberFormat('@')
+    .setValue(String(compte.valeurCode));
+}
+
+function obtenirCompteConfigurationMixte_(codeCompte) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configuration = obtenirFeuilleMixte_(ss, 'Configuration');
+  const derniereLigne = configuration.getLastRow();
+
+  if (derniereLigne < 6) {
+    throw new Error('Le plan comptable est vide.');
+  }
+
+  const codeRecherche = String(codeCompte || '').trim();
+  const comptes = configuration
+    .getRange(6, 1, derniereLigne - 5, 2)
+    .getValues();
+
+  for (let index = 0; index < comptes.length; index += 1) {
+    const valeurCode = comptes[index][0];
+
+    if (String(valeurCode || '').trim() === codeRecherche) {
+      return {
+        valeurCode: valeurCode,
+        nom: String(comptes[index][1] || '').trim()
+      };
+    }
+  }
+
+  throw new Error(
+    'Le compte ' + codeRecherche + ' est absent de « Configuration ».'
+  );
+}
+
+function reparerNomsComptesTransactionsMixtes_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const transactions = obtenirFeuilleMixte_(ss, 'Transactions');
+  const configuration = obtenirFeuilleMixte_(ss, 'Configuration');
+  const derniereLigneConfiguration = configuration.getLastRow();
+  const derniereLigneTransactions = transactions.getLastRow();
+
+  if (
+    derniereLigneConfiguration < 6 ||
+    derniereLigneTransactions < 6
+  ) {
+    return 0;
+  }
+
+  const comptes = {};
+
+  configuration
+    .getRange(
+      6,
+      1,
+      derniereLigneConfiguration - 5,
+      2
+    )
+    .getValues()
+    .forEach(function(ligne) {
+      const code = String(ligne[0] || '').trim();
+
+      if (code) {
+        comptes[code] = {
+          valeurCode: ligne[0],
+          nom: String(ligne[1] || '').trim()
+        };
+      }
+    });
+
+  const valeurs = transactions
+    .getRange(
+      6,
+      1,
+      derniereLigneTransactions - 5,
+      15
+    )
+    .getValues();
+  let compteur = 0;
+
+  valeurs.forEach(function(ligne, index) {
+    const idTransaction = String(ligne[0] || '').trim();
+    const code = String(ligne[6] || '').trim();
+    const codeEstDuTexte = typeof ligne[6] === 'string';
+    const nomActuel = String(ligne[7] || '').trim();
+    const source = String(ligne[12] || '').trim();
+    const compte = comptes[code];
+
+    if (
+      idTransaction.indexOf('MIX-') === 0 &&
+      source === 'Import' &&
+      compte &&
+      (
+        !codeEstDuTexte ||
+        nomActuel === '' ||
+        nomActuel === 'Compte inconnu' ||
+        nomActuel !== compte.nom
+      )
+    ) {
+      const celluleCode = transactions.getRange(index + 6, 7);
+
+      celluleCode
+        .setNumberFormat('@')
+        .setValue(String(compte.valeurCode));
+
+      transactions
+        .getRange(index + 6, 8)
+        .setValue(compte.nom);
+
+      compteur += 1;
+    }
+  });
+
+  if (compteur) {
+    SpreadsheetApp.flush();
+  }
+
+  return compteur;
+}
+
+function ecrirePaireJournalRevenuMixte_(
+  journal,
+  planComptable,
+  idTransaction,
+  dateTransaction,
+  ecriture
+) {
+  const description = ecriture.description;
+  const montant = arrondirMontantMixte_(ecriture.montant);
+
+  ecrireLigneJournalMixte_(
+    journal,
+    planComptable,
+    'ECR-' + idTransaction + '-D',
+    idTransaction,
+    dateTransaction,
+    '1000',
+    montant,
+    0,
+    ecriture.programme,
+    ecriture.projet,
+    description
+  );
+
+  ecrireLigneJournalMixte_(
+    journal,
+    planComptable,
+    'ECR-' + idTransaction + '-C',
+    idTransaction,
+    dateTransaction,
+    ecriture.codeCompte,
+    0,
+    montant,
+    ecriture.programme,
+    ecriture.projet,
+    description
+  );
+}
+
+function ecrirePaireJournalCoutMixte_(
+  journal,
+  planComptable,
+  idTransaction,
+  dateTransaction,
+  mouvement
+) {
+  const coutTotal = arrondirMontantMixte_(
+    mouvement.quantite * mouvement.coutUnitaire
+  );
+
+  if (coutTotal <= 0) {
+    return;
+  }
+
+  const description = 'Coût des marchandises vendues – ' +
+    mouvement.composante;
+
+  ecrireLigneJournalMixte_(
+    journal,
+    planComptable,
+    'ECR-' + idTransaction + '-CMV-D',
+    idTransaction,
+    dateTransaction,
+    '5000',
+    coutTotal,
+    0,
+    'Marchandise',
+    '',
+    description
+  );
+
+  ecrireLigneJournalMixte_(
+    journal,
+    planComptable,
+    'ECR-' + idTransaction + '-CMV-C',
+    idTransaction,
+    dateTransaction,
+    '1300',
+    0,
+    coutTotal,
+    'Marchandise',
+    '',
+    description
+  );
+}
+
+function ecrireLigneJournalMixte_(
+  feuille,
+  planComptable,
+  idEcriture,
+  idTransaction,
+  dateTransaction,
+  codeCompte,
+  debit,
+  credit,
+  programme,
+  projet,
+  description
+) {
+  const compte = planComptable[codeCompte];
+
+  if (!compte) {
+    throw new Error('Le compte ' + codeCompte + ' est introuvable.');
+  }
+
+  const ligne = prochaineLigneVideMixte_(feuille, 6);
+  const modele = feuille.getRange(6, 1, 1, 13);
+  const cible = feuille.getRange(ligne, 1, 1, 13);
+
+  modele.copyTo(
+    cible,
+    SpreadsheetApp.CopyPasteType.PASTE_FORMAT,
+    false
+  );
+
+  cible.setValues([[
+    idEcriture,
+    idTransaction,
+    dateTransaction,
+    codeCompte,
+    compte.nom,
+    compte.type,
+    arrondirMontantMixte_(debit),
+    arrondirMontantMixte_(credit),
+    programme,
+    projet,
+    description,
+    '',
+    'Oui'
+  ]]);
+}
+
+function creerForfaitDepuisRepartitionMixte_(
+  feuille,
+  dateVente,
+  acheteur,
+  typeForfait,
+  montant,
+  idImport
+) {
+  const derniereLigne = feuille.getLastRow();
+
+  if (derniereLigne >= 6) {
+    const existants = feuille
+      .getRange(6, 1, derniereLigne - 5, 9)
+      .getValues();
+
+    const existe = existants.some(function(ligne) {
+      const statut = String(ligne[8] || '').trim();
+
+      return (
+        String(ligne[5] || '').trim() === idImport &&
+        String(ligne[3] || '').trim() === typeForfait &&
+        Math.abs(Number(ligne[4] || 0) - Number(montant || 0)) < 0.005 &&
+        statut !== 'Annulé' &&
+        statut !== 'Remboursé'
+      );
+    });
+
+    if (existe) {
+      return;
+    }
+  }
+
+  const saison = dateVente instanceof Date
+    ? dateVente.getFullYear()
+    : new Date(dateVente).getFullYear();
+
+  const idForfait = genererProchainIdForfaitMixte_(feuille, saison);
+  const ligne = prochaineLigneVideMixte_(feuille, 6);
+  const modele = feuille.getRange(6, 1, 1, 11);
+  const cible = feuille.getRange(ligne, 1, 1, 11);
+
+  modele.copyTo(
+    cible,
+    SpreadsheetApp.CopyPasteType.PASTE_FORMAT,
+    false
+  );
+  modele.copyTo(
+    cible,
+    SpreadsheetApp.CopyPasteType.PASTE_DATA_VALIDATION,
+    false
+  );
+
+  const formulePion =
+    '=IF($A' +
+    ligne +
+    '="","",IF(OR($I' +
+    ligne +
+    '="Annulé",$I' +
+    ligne +
+    '="Remboursé"),0,IF($D' +
+    ligne +
+    '="Forfait Pion joues-tu?",$E' +
+    ligne +
+    ',IF($D' +
+    ligne +
+    '="Forfait combiné",$E' +
+    ligne +
+    '*0.6,0))))';
+
+  const formuleCartier =
+    '=IF($A' +
+    ligne +
+    '="","",IF(OR($I' +
+    ligne +
+    '="Annulé",$I' +
+    ligne +
+    '="Remboursé"),0,IF($D' +
+    ligne +
+    '="Forfait Cartier",$E' +
+    ligne +
+    ',IF($D' +
+    ligne +
+    '="Forfait combiné",$E' +
+    ligne +
+    '*0.4,0))))';
+
+  cible.setValues([[
+    idForfait,
+    dateVente,
+    acheteur,
+    typeForfait,
+    arrondirMontantMixte_(montant),
+    idImport,
+    formulePion,
+    formuleCartier,
+    'Actif',
+    'Créé depuis une transaction mixte',
+    saison
+  ]]);
+}
+
+function preparerMouvementsInventaireMixte_(
+  inventaire,
+  lignesActives
+) {
+  const correspondances = {
+    'T-shirt': 'MERCH-TS-NOIR',
+    'Chandail à manches longues': 'MERCH-LS-NOIR',
+    'Hoodie': 'MERCH-HD-NOIR'
+  };
+
+  const derniereLigne = inventaire.getLastRow();
+  const valeurs = derniereLigne >= 6
+    ? inventaire.getRange(6, 1, derniereLigne - 5, 14).getValues()
+    : [];
+
+  const articles = {};
+
+  valeurs.forEach(function(ligne, index) {
+    const ugs = String(ligne[0] || '').trim();
+
+    if (ugs) {
+      articles[ugs] = {
+        ligne: index + 6,
+        ventesActuelles: Number(ligne[5] || 0),
+        quantiteDisponible: Number(ligne[8] || 0),
+        coutUnitaire: Number(ligne[9] || ligne[3] || 0)
+      };
+    }
+  });
+
+  const mouvementsParUgs = {};
+
+  lignesActives.forEach(function(ligne) {
+    const composante = String(ligne.valeurs[5] || '').trim();
+    const ugs = correspondances[composante];
+
+    if (!ugs) {
+      return;
+    }
+
+    const quantite = Number(ligne.valeurs[6] || 0);
+
+    if (!mouvementsParUgs[ugs]) {
+      mouvementsParUgs[ugs] = {
+        ugs: ugs,
+        composante: composante,
+        quantite: 0,
+        numerosLignesSources: []
+      };
+    }
+
+    mouvementsParUgs[ugs].quantite += quantite;
+    mouvementsParUgs[ugs].numerosLignesSources.push(ligne.numero);
+  });
+
+  const mouvements = [];
+
+  Object.keys(mouvementsParUgs).forEach(function(ugs) {
+    const mouvement = mouvementsParUgs[ugs];
+    const article = articles[ugs];
+
+    if (!article) {
+      throw new Error(
+        'L’article ' + ugs + ' est introuvable dans « Inventaire ».'
+      );
+    }
+
+    if (article.quantiteDisponible < mouvement.quantite) {
+      throw new Error(
+        'Stock insuffisant pour « ' +
+        mouvement.composante +
+        ' » : ' +
+        article.quantiteDisponible +
+        ' disponible(s), ' +
+        mouvement.quantite +
+        ' demandé(s).'
+      );
+    }
+
+    mouvements.push({
+      ugs: ugs,
+      composante: mouvement.composante,
+      quantite: mouvement.quantite,
+      numerosLignesSources: mouvement.numerosLignesSources,
+      numeroLigneSource: mouvement.numerosLignesSources[0],
+      ligneInventaire: article.ligne,
+      ventesActuelles: article.ventesActuelles,
+      coutUnitaire: article.coutUnitaire
+    });
+  });
+
+  return mouvements;
+}
+
+function appliquerMouvementsInventaireMixte_(
+  inventaire,
+  mouvements
+) {
+  mouvements.forEach(function(mouvement) {
+    inventaire
+      .getRange(mouvement.ligneInventaire, 6)
+      .setValue(
+        Number(mouvement.ventesActuelles || 0) +
+        Number(mouvement.quantite || 0)
+      );
+  });
+}
+
+function lireLignesRepartitionMixte_(feuille, idImport) {
+  const derniereLigne = feuille.getMaxRows();
+
+  if (derniereLigne < 6) {
+    return [];
+  }
+
+  const correspondances = feuille
+    .getRange(6, 1, derniereLigne - 5, 1)
+    .createTextFinder(String(idImport))
+    .matchEntireCell(true)
+    .findAll();
+
+  return correspondances
+    .map(function(cellule) {
+      const numero = cellule.getRow();
+      const valeurs = feuille
+        .getRange(numero, 1, 1, 17)
+        .getValues()[0];
+
+      return {
+        numero: numero,
+        valeurs: valeurs
+      };
+    })
+    .filter(function(ligne) {
+      return String(ligne.valeurs[0] || '').trim() === idImport;
+    });
+}
+
+function marquerTransactionMixteEnregistree_(
+  feuille,
+  idImport,
+  idGroupe
+) {
+  const derniereLigne = feuille.getLastRow();
+
+  if (derniereLigne < 6) {
+    return;
+  }
+
+  const ids = feuille
+    .getRange(6, 1, derniereLigne - 5, 1)
+    .getDisplayValues();
+
+  ids.forEach(function(ligne, index) {
+    if (String(ligne[0] || '').trim() === idImport) {
+      feuille
+        .getRange(index + 6, 17)
+        .setValue('Enregistrée')
+        .setNote('Transaction comptable : ' + idGroupe);
+    }
+  });
+}
+
+function nettoyerTraitementPartielMixte_(
+  transactions,
+  journal,
+  forfaits,
+  idImport,
+  idGroupe
+) {
+  const prefixeTransaction = idGroupe + '-';
+  const lignesTransactions = [];
+  const lignesJournal = [];
+  const lignesForfaits = [];
+  const idsTransactionsPartielles = {};
+
+  if (transactions.getMaxRows() >= 6) {
+    transactions
+      .getRange(6, 1, transactions.getMaxRows() - 5, 15)
+      .getDisplayValues()
+      .forEach(function(ligne, index) {
+        const idTransaction = String(ligne[0] || '').trim();
+        const source = String(ligne[12] || '').trim();
+        const reference = String(ligne[13] || '').trim();
+        const statut = String(ligne[14] || '').trim();
+
+        if (
+          reference === idImport &&
+          source === 'Import' &&
+          idTransaction.indexOf(prefixeTransaction) === 0 &&
+          statut !== 'Annulée' &&
+          statut !== 'Exemple'
+        ) {
+          lignesTransactions.push(index + 6);
+          idsTransactionsPartielles[idTransaction] = true;
+        }
+      });
+  }
+
+  if (journal.getMaxRows() >= 6) {
+    journal
+      .getRange(6, 1, journal.getMaxRows() - 5, 2)
+      .getDisplayValues()
+      .forEach(function(ligne, index) {
+        const idEcriture = String(ligne[0] || '').trim();
+        const idTransaction = String(ligne[1] || '').trim();
+
+        if (
+          idsTransactionsPartielles[idTransaction] &&
+          idEcriture.indexOf('ANN-') !== 0
+        ) {
+          lignesJournal.push(index + 6);
+        }
+      });
+  }
+
+  if (forfaits.getMaxRows() >= 6) {
+    forfaits
+      .getRange(6, 1, forfaits.getMaxRows() - 5, 10)
+      .getDisplayValues()
+      .forEach(function(ligne, index) {
+        const reference = String(ligne[5] || '').trim();
+        const statut = String(ligne[8] || '').trim();
+        const notes = String(ligne[9] || '').trim();
+
+        if (
+          reference === idImport &&
+          notes.toLowerCase().indexOf('transaction mixte') !== -1 &&
+          statut !== 'Annulé' &&
+          statut !== 'Remboursé'
+        ) {
+          lignesForfaits.push(index + 6);
+        }
+      });
+  }
+
+  lignesTransactions.forEach(function(numeroLigne) {
+    transactions.getRange(numeroLigne, 1, 1, 17).clearContent();
+  });
+
+  lignesJournal.forEach(function(numeroLigne) {
+    journal.getRange(numeroLigne, 1, 1, 13).clearContent();
+  });
+
+  lignesForfaits.forEach(function(numeroLigne) {
+    forfaits.getRange(numeroLigne, 1, 1, 11).clearContent();
+  });
+
+  if (
+    lignesTransactions.length ||
+    lignesJournal.length ||
+    lignesForfaits.length
+  ) {
+    SpreadsheetApp.flush();
+  }
+}
+
+function transactionBancaireDejaPresenteMixte_(
+  feuilleTransactions,
+  idImport
+) {
+  const derniereLigne = feuilleTransactions.getLastRow();
+
+  if (derniereLigne < 6) {
+    return false;
+  }
+
+  return feuilleTransactions
+    .getRange(6, 14, derniereLigne - 5, 2)
+    .getDisplayValues()
+    .some(function(ligne) {
+      const reference = String(ligne[0] || '').trim();
+      const statut = String(ligne[1] || '').trim();
+
+      return reference === idImport && statut !== 'Annulée';
+    });
+}
+
+function chargerPlanComptableMixte_(configuration) {
+  const derniereLigne = configuration.getLastRow();
+
+  if (derniereLigne < 6) {
+    throw new Error('Le plan comptable est vide.');
+  }
+
+  const plan = {};
+
+  configuration
+    .getRange(6, 1, derniereLigne - 5, 3)
+    .getDisplayValues()
+    .forEach(function(ligne) {
+      const code = String(ligne[0] || '').trim();
+
+      if (code) {
+        plan[code] = {
+          nom: String(ligne[1] || '').trim(),
+          type: String(ligne[2] || '').trim()
+        };
+      }
+    });
+
+  return plan;
+}
+
+function verifierComptesRequisMixte_(planComptable) {
+  ['1000', '1300', '4000', '4010', '4020', '5000'].forEach(
+    function(code) {
+      if (!planComptable[code]) {
+        throw new Error(
+          'Le compte requis ' + code + ' est absent du plan comptable.'
+        );
+      }
+    }
+  );
+}
+
+function genererProchainIdForfaitMixte_(feuille, saison) {
+  const derniereLigne = feuille.getLastRow();
+  let maximum = 0;
+
+  if (derniereLigne >= 6) {
+    feuille
+      .getRange(6, 1, derniereLigne - 5, 1)
+      .getDisplayValues()
+      .forEach(function(ligne) {
+        const correspondance = String(ligne[0] || '').match(
+          /^FOR-\d{4}-(\d+)$/
+        );
+
+        if (correspondance) {
+          maximum = Math.max(maximum, Number(correspondance[1]));
+        }
+      });
+  }
+
+  return (
+    'FOR-' +
+    saison +
+    '-' +
+    String(maximum + 1).padStart(4, '0')
+  );
+}
+
+function creerIdGroupeMixte_(idImport) {
+  const morceaux = String(idImport || '').split('-');
+
+  if (
+    morceaux.length >= 4 &&
+    morceaux[0] === 'B'
+  ) {
+    return 'MIX-' + morceaux[1] + '-' + morceaux[2];
+  }
+
+  return 'MIX-' +
+    Utilities.getUuid().replace(/-/g, '').substring(0, 12).toUpperCase();
+}
+
+function creerIdGroupeDisponibleMixte_(transactions, idImport) {
+  const idBase = creerIdGroupeMixte_(idImport);
+  const derniereLigne = transactions.getLastRow();
+  let derniereRevision = 0;
+
+  if (derniereLigne >= 6) {
+    transactions
+      .getRange(6, 1, derniereLigne - 5, 1)
+      .getDisplayValues()
+      .forEach(function(ligne) {
+        const idTransaction = String(ligne[0] || '').trim();
+
+        if (idTransaction.indexOf(idBase + '-') !== 0) {
+          return;
+        }
+
+        const suffixe = idTransaction.substring(idBase.length);
+        const revision = suffixe.match(/^-R(\d+)-\d+$/);
+
+        if (revision) {
+          derniereRevision = Math.max(
+            derniereRevision,
+            Number(revision[1])
+          );
+        } else if (/^-\d+$/.test(suffixe)) {
+          derniereRevision = Math.max(derniereRevision, 1);
+        }
+      });
+  }
+
+  return derniereRevision === 0
+    ? idBase
+    : idBase + '-R' + (derniereRevision + 1);
+}
+
+function extraireNomInteracMixte_(description) {
+  const texte = String(description || '').trim();
+  const correspondance = texte.match(/de\s*\/([^/]+)\//i);
+
+  if (correspondance && correspondance[1]) {
+    return correspondance[1].trim();
+  }
+
+  return texte || 'Client';
+}
+
+function estForfaitMixte_(composante) {
+  return [
+    'Forfait Pion joues-tu?',
+    'Forfait Cartier',
+    'Forfait combiné'
+  ].indexOf(composante) !== -1;
+}
+
+function obtenirFeuilleMixte_(ss, nom) {
+  const feuille = ss.getSheetByName(nom);
+
+  if (!feuille) {
+    throw new Error('L’onglet « ' + nom + ' » est introuvable.');
+  }
+
+  return feuille;
+}
+
+function trouverLigneParValeurMixte_(
+  feuille,
+  colonne,
+  valeur,
+  premiereLigne
+) {
+  const derniereLigne = feuille.getMaxRows();
+
+  if (derniereLigne < premiereLigne) {
+    return 0;
+  }
+
+  const resultat = feuille
+    .getRange(
+      premiereLigne,
+      colonne,
+      derniereLigne - premiereLigne + 1,
+      1
+    )
+    .createTextFinder(String(valeur))
+    .matchEntireCell(true)
+    .findNext();
+
+  return resultat ? resultat.getRow() : 0;
+}
+
+function prochaineLigneVideMixte_(feuille, premiereLigne) {
+  const derniereLignePhysique = feuille.getMaxRows();
+
+  if (derniereLignePhysique < premiereLigne) {
+    feuille.insertRowsAfter(
+      derniereLignePhysique,
+      premiereLigne - derniereLignePhysique
+    );
+  }
+
+  const nombreLignes =
+    feuille.getMaxRows() - premiereLigne + 1;
+  const ids = feuille
+    .getRange(premiereLigne, 1, nombreLignes, 1)
+    .getDisplayValues();
+
+  for (let index = 0; index < ids.length; index += 1) {
+    if (String(ids[index][0] || '').trim() === '') {
+      return premiereLigne + index;
+    }
+  }
+
+  const ancienneLimite = feuille.getMaxRows();
+  feuille.insertRowsAfter(ancienneLimite, 100);
+  return ancienneLimite + 1;
+}
+
+function arrondirMontantMixte_(montant) {
+  return Math.round((Number(montant || 0) + Number.EPSILON) * 100) / 100;
+}

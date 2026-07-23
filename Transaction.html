@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      color: #202124;
+      margin: 0;
+      padding: 16px;
+      background: #fff;
+    }
+
+    h2 {
+      margin: 0 0 6px;
+      font-size: 20px;
+    }
+
+    .introduction {
+      color: #5f6368;
+      font-size: 13px;
+      margin-bottom: 18px;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin: 13px 0 5px;
+    }
+
+    input,
+    select,
+    textarea {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 42px;
+      padding: 9px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      background: #fff;
+      font-size: 15px;
+    }
+
+    textarea {
+      min-height: 70px;
+      resize: vertical;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: #1a73e8;
+      outline: none;
+      box-shadow: 0 0 0 1px #1a73e8;
+    }
+
+    .aide {
+      color: #5f6368;
+      font-size: 11px;
+      margin-top: 4px;
+    }
+
+    button {
+      width: 100%;
+      min-height: 46px;
+      margin-top: 20px;
+      border: none;
+      border-radius: 6px;
+      background: #1a73e8;
+      color: white;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      background: #9aa0a6;
+      cursor: wait;
+    }
+
+    .message {
+      display: none;
+      padding: 11px;
+      border-radius: 6px;
+      margin-bottom: 14px;
+      font-size: 13px;
+    }
+
+    .succes {
+      display: block;
+      color: #137333;
+      background: #e6f4ea;
+    }
+
+    .erreur {
+      display: block;
+      color: #b3261e;
+      background: #fce8e6;
+    }
+
+    .chargement {
+      color: #5f6368;
+      font-size: 13px;
+    }
+  </style>
+</head>
+
+<body>
+  <h2>Nouvelle transaction</h2>
+
+  <div class="introduction">
+    La transaction et son écriture comptable seront créées ensemble.
+  </div>
+
+  <div id="message" class="message"></div>
+  <div id="chargement" class="chargement">Chargement des options…</div>
+
+  <form id="formulaire" style="display:none;">
+    <label for="date">Date *</label>
+    <input id="date" name="date" type="date" required>
+
+    <label for="type">Type *</label>
+    <select id="type" name="type" required>
+      <option value="Dépense">Dépense</option>
+      <option value="Revenu">Revenu</option>
+      <option value="Transfert">Transfert entre comptes</option>
+    </select>
+
+    <label for="contact">Client ou fournisseur</label>
+    <input
+      id="contact"
+      name="contact"
+      type="text"
+      placeholder="Nom de l’entreprise ou de la personne"
+    >
+
+    <label for="description">Description *</label>
+    <textarea
+      id="description"
+      name="description"
+      required
+      placeholder="Expliquez brièvement l’opération"
+    ></textarea>
+
+    <label for="montant">Montant *</label>
+    <input
+      id="montant"
+      name="montant"
+      type="number"
+      min="0.01"
+      step="0.01"
+      inputmode="decimal"
+      required
+      placeholder="0,00"
+    >
+
+    <label for="compte">Compte comptable *</label>
+    <select id="compte" name="compte" required></select>
+    <div id="aideCompte" class="aide"></div>
+
+    <label for="programme">Programme ou activité *</label>
+    <select id="programme" name="programme" required></select>
+
+    <label for="projet">Projet précis</label>
+    <select id="projet" name="projet">
+      <option value="">Aucun projet précis</option>
+    </select>
+
+    <label for="comptePaiement">Compte de paiement *</label>
+    <select
+      id="comptePaiement"
+      name="comptePaiement"
+      required
+    ></select>
+
+    <label for="document">Lien vers la pièce dans Drive</label>
+    <input
+      id="document"
+      name="document"
+      type="url"
+      placeholder="https://drive.google.com/..."
+    >
+    <div class="aide">
+      Le téléversement direct des reçus sera ajouté plus tard.
+    </div>
+
+    <button id="bouton" type="submit">
+      Enregistrer la transaction
+    </button>
+  </form>
+
+  <script>
+    let optionsSysteme = null;
+
+    const formulaire = document.getElementById('formulaire');
+    const chargement = document.getElementById('chargement');
+    const message = document.getElementById('message');
+    const type = document.getElementById('type');
+    const compte = document.getElementById('compte');
+    const comptePaiement =
+      document.getElementById('comptePaiement');
+    const aideCompte = document.getElementById('aideCompte');
+    const bouton = document.getElementById('bouton');
+
+    google.script.run
+      .withSuccessHandler(initialiser)
+      .withFailureHandler(afficherErreur)
+      .obtenirOptionsTransaction();
+
+    function initialiser(options) {
+      optionsSysteme = options;
+
+      document.getElementById('date').value = options.date;
+
+      remplirSelect(
+        document.getElementById('programme'),
+        options.programmes.map(function(nom) {
+          return { valeur: nom, texte: nom };
+        }),
+        'Choisir un programme'
+      );
+
+      const projets = options.projets.map(function(projet) {
+        return {
+          valeur: projet.id,
+          texte: projet.id + ' — ' + projet.nom
+        };
+      });
+
+      remplirSelect(
+        document.getElementById('projet'),
+        projets,
+        'Aucun projet précis'
+      );
+
+      remplirComptes();
+      remplirComptesPaiement();
+
+      chargement.style.display = 'none';
+      formulaire.style.display = 'block';
+    }
+
+    function remplirSelect(element, options, premierChoix) {
+      element.innerHTML = '';
+
+      const vide = document.createElement('option');
+      vide.value = '';
+      vide.textContent = premierChoix;
+      element.appendChild(vide);
+
+      options.forEach(function(option) {
+        const ligne = document.createElement('option');
+        ligne.value = option.valeur;
+        ligne.textContent = option.texte;
+        element.appendChild(ligne);
+      });
+    }
+
+    function remplirComptes() {
+      const typeChoisi = type.value;
+
+      const comptesFiltres = optionsSysteme.comptes.filter(
+        function(item) {
+          if (typeChoisi === 'Revenu') {
+            return item.type === 'Revenu' || item.code === '2200';
+          }
+
+          if (typeChoisi === 'Dépense') {
+            return item.type === 'Dépense' ||
+                   item.type === 'Actif';
+          }
+
+          return item.type === 'Actif';
+        }
+      );
+
+      remplirSelect(
+        compte,
+        comptesFiltres.map(function(item) {
+          return {
+            valeur: item.code,
+            texte: item.code + ' — ' + item.nom
+          };
+        }),
+        'Choisir un compte'
+      );
+
+      if (typeChoisi === 'Revenu') {
+        aideCompte.textContent =
+          'Choisissez la nature du revenu.';
+      } else if (typeChoisi === 'Dépense') {
+        aideCompte.textContent =
+          'Choisissez la dépense ou l’actif acheté.';
+      } else {
+        aideCompte.textContent =
+          'Choisissez le compte qui reçoit l’argent.';
+      }
+    }
+
+    function remplirComptesPaiement() {
+      const codesPermis = ['1000', '1010', '1100'];
+
+      const comptes = optionsSysteme.comptes.filter(
+        function(item) {
+          return codesPermis.includes(item.code);
+        }
+      );
+
+      remplirSelect(
+        comptePaiement,
+        comptes.map(function(item) {
+          return {
+            valeur: item.code,
+            texte: item.code + ' — ' + item.nom
+          };
+        }),
+        'Choisir le compte utilisé'
+      );
+
+      comptePaiement.value = '1000';
+    }
+
+    type.addEventListener('change', remplirComptes);
+
+    formulaire.addEventListener('submit', function(evenement) {
+      evenement.preventDefault();
+
+      bouton.disabled = true;
+      bouton.textContent = 'Enregistrement…';
+      effacerMessage();
+
+      const donnees = Object.fromEntries(
+        new FormData(formulaire).entries()
+      );
+
+      google.script.run
+        .withSuccessHandler(transactionEnregistree)
+        .withFailureHandler(afficherErreur)
+        .enregistrerTransaction(donnees);
+    });
+
+    function transactionEnregistree(resultat) {
+      message.className = 'message succes';
+      message.textContent =
+        'Transaction enregistrée : ' + resultat.identifiant;
+
+      formulaire.reset();
+      document.getElementById('date').value =
+        optionsSysteme.date;
+
+      type.value = 'Dépense';
+      remplirComptes();
+      remplirComptesPaiement();
+
+      bouton.disabled = false;
+      bouton.textContent = 'Enregistrer la transaction';
+    }
+
+    function afficherErreur(erreur) {
+      message.className = 'message erreur';
+      message.textContent =
+        erreur && erreur.message
+          ? erreur.message
+          : String(erreur);
+
+      chargement.style.display = 'none';
+      bouton.disabled = false;
+      bouton.textContent = 'Enregistrer la transaction';
+    }
+
+    function effacerMessage() {
+      message.className = 'message';
+      message.textContent = '';
+    }
+  </script>
+</body>
+</html>

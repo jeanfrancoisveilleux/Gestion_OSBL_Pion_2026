@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+      color: #202124;
+      background: #fff;
+    }
+
+    h2 {
+      margin: 0 0 8px;
+      font-size: 20px;
+    }
+
+    .introduction {
+      color: #5f6368;
+      font-size: 13px;
+      line-height: 1.45;
+      margin-bottom: 18px;
+    }
+
+    .zone {
+      padding: 18px;
+      border: 2px dashed #dadce0;
+      border-radius: 8px;
+      background: #f8f9fa;
+    }
+
+    input[type="file"] {
+      box-sizing: border-box;
+      width: 100%;
+      font-size: 14px;
+    }
+
+    button {
+      min-height: 42px;
+      padding: 9px 18px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #importer {
+      width: 100%;
+      margin-top: 16px;
+      color: white;
+      background: #1a73e8;
+    }
+
+    #fermer {
+      display: none;
+      margin-top: 12px;
+      color: #1a73e8;
+      background: #e8f0fe;
+    }
+
+    button:disabled {
+      background: #9aa0a6;
+      cursor: wait;
+    }
+
+    .message {
+      display: none;
+      margin-top: 16px;
+      padding: 13px;
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .succes {
+      display: block;
+      color: #137333;
+      background: #e6f4ea;
+    }
+
+    .erreur {
+      display: block;
+      color: #b3261e;
+      background: #fce8e6;
+    }
+
+    .avertissement {
+      color: #8a4b00;
+      font-weight: 600;
+    }
+
+    .confidentiel {
+      margin-top: 14px;
+      color: #5f6368;
+      font-size: 11px;
+    }
+  </style>
+</head>
+
+<body>
+  <h2>Importer un relevé Desjardins</h2>
+
+  <div class="introduction">
+    Les transactions seront ajoutées dans l’onglet
+    <strong>Import bancaire</strong> avec le statut
+    <strong>À classer</strong>. Aucune écriture comptable
+    ne sera créée à cette étape.
+  </div>
+
+  <div class="zone">
+    <input
+      id="fichier"
+      type="file"
+      accept=".csv,text/csv"
+    >
+
+    <button id="importer" type="button">
+      Analyser et importer
+    </button>
+  </div>
+
+  <div id="message" class="message"></div>
+
+  <button id="fermer" type="button">
+    Fermer
+  </button>
+
+  <div class="confidentiel">
+    Utilisez le format « CSV accentué » de Desjardins.
+    Les doublons déjà présents seront ignorés.
+  </div>
+
+  <script>
+    const fichier = document.getElementById('fichier');
+    const importer = document.getElementById('importer');
+    const fermer = document.getElementById('fermer');
+    const message = document.getElementById('message');
+
+    importer.addEventListener('click', function() {
+      if (!fichier.files.length) {
+        afficherErreur('Veuillez sélectionner un fichier CSV.');
+        return;
+      }
+
+      const selection = fichier.files[0];
+
+      if (!selection.name.toLowerCase().endsWith('.csv')) {
+        afficherErreur('Le fichier sélectionné doit être un CSV.');
+        return;
+      }
+
+      importer.disabled = true;
+      importer.textContent = 'Importation en cours…';
+      message.className = 'message';
+      message.textContent = '';
+
+      const lecteur = new FileReader();
+
+      lecteur.onload = function(evenement) {
+        google.script.run
+          .withSuccessHandler(importationTerminee)
+          .withFailureHandler(function(erreur) {
+            afficherErreur(
+              erreur && erreur.message
+                ? erreur.message
+                : String(erreur)
+            );
+          })
+          .importerCsvDesjardins(
+            evenement.target.result,
+            selection.name
+          );
+      };
+
+      lecteur.onerror = function() {
+        afficherErreur(
+          'Impossible de lire le fichier sélectionné.'
+        );
+      };
+
+      lecteur.readAsText(selection, 'ISO-8859-1');
+    });
+
+    fermer.addEventListener('click', function() {
+      google.script.host.close();
+    });
+
+    function importationTerminee(resultat) {
+      const argent = new Intl.NumberFormat('fr-CA', {
+        style: 'currency',
+        currency: 'CAD'
+      });
+
+      let contenu =
+        '<strong>Importation terminée</strong><br>' +
+        'Transactions importées : ' +
+        resultat.importees +
+        '<br>' +
+        'Doublons ignorés : ' +
+        resultat.doublons +
+        '<br>' +
+        'Lignes rejetées : ' +
+        resultat.rejetees;
+
+      if (resultat.importees > 0) {
+        contenu +=
+          '<br><br>Solde initial calculé : ' +
+          argent.format(resultat.soldeInitial) +
+          '<br>Solde final : ' +
+          argent.format(resultat.soldeFinal);
+
+        if (Math.abs(resultat.ecartOuverture) < 0.01) {
+          contenu +=
+            '<br><strong>Le solde initial correspond au classeur.</strong>';
+        } else {
+          contenu +=
+            '<br><span class="avertissement">' +
+            'Écart du solde initial : ' +
+            argent.format(resultat.ecartOuverture) +
+            '</span>';
+        }
+      } else if (resultat.message) {
+        contenu += '<br><br>' + resultat.message;
+      }
+
+      message.className = 'message succes';
+      message.innerHTML = contenu;
+
+      importer.style.display = 'none';
+      fermer.style.display = 'inline-block';
+    }
+
+    function afficherErreur(texte) {
+      message.className = 'message erreur';
+      message.textContent = texte;
+
+      importer.disabled = false;
+      importer.textContent = 'Analyser et importer';
+    }
+  </script>
+</body>
+</html>
