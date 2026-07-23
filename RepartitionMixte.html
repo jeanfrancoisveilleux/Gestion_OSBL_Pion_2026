@@ -249,7 +249,7 @@
     </style>
   </head>
   <body>
-    <h1>Répartir la transaction</h1>
+    <h1 id="titreInterface">Répartir la transaction</h1>
     <div class="sous-titre">
       Ajoutez jusqu’à cinq composantes. Le total doit correspondre exactement au montant bancaire.
     </div>
@@ -508,6 +508,7 @@
 
         const donnees = {
           idImport: DONNEES.idImport,
+          idTransactionSource: DONNEES.idTransactionSource || '',
           lignes: lignes.map(ligne => ({
             composante: ligne.composante,
             quantite: nombre(ligne.quantite),
@@ -515,7 +516,7 @@
           }))
         };
 
-        google.script.run
+        const appel = google.script.run
           .withSuccessHandler(resultat => {
             afficherMessage(resultat.message, 'succes');
             bouton.textContent = 'Enregistrée';
@@ -528,12 +529,21 @@
                 : 'Une erreur est survenue.',
               'erreur'
             );
-            bouton.textContent = 'Enregistrer et comptabiliser';
+            bouton.textContent = DONNEES.boutonPrincipal || 'Enregistrer';
             calculerTotaux();
-          })
-          .enregistrerEtComptabiliserTransactionMixte(donnees);
+          });
+
+        if (DONNEES.mode === 'revision') {
+          appel.enregistrerRevisionTransactionMixte(donnees);
+        } else {
+          appel.enregistrerEtComptabiliserTransactionMixte(donnees);
+        }
       }
 
+      document.getElementById('titreInterface').textContent =
+        DONNEES.titre || 'Répartir la transaction';
+      document.getElementById('enregistrer').textContent =
+        DONNEES.boutonPrincipal || 'Enregistrer et comptabiliser';
       document.getElementById('date').textContent = DONNEES.date;
       document.getElementById('description').textContent =
         DONNEES.description;
