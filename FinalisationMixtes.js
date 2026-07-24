@@ -390,7 +390,7 @@ function creerEcrituresAnnulationJournal_(journal, idsTransactions) {
   }
 
   const valeurs = journal
-    .getRange(6, 1, derniereLigne - 5, 13)
+    .getRange(6, 1, derniereLigne - 5, 16)
     .getValues();
   const idsEcrituresExistantes = {};
   const ecrituresAInverser = [];
@@ -433,10 +433,10 @@ function creerEcrituresAnnulationJournal_(journal, idsTransactions) {
 
   ecrituresAInverser.forEach(function(ligneSource) {
     const ligneCible = prochaineLigneVideMixte_(journal, 6);
-    const cible = journal.getRange(ligneCible, 1, 1, 13);
+    const cible = journal.getRange(ligneCible, 1, 1, 16);
 
     journal
-      .getRange(6, 1, 1, 13)
+      .getRange(6, 1, 1, 16)
       .copyTo(
         cible,
         SpreadsheetApp.CopyPasteType.PASTE_FORMAT,
@@ -456,13 +456,21 @@ function creerEcrituresAnnulationJournal_(journal, idsTransactions) {
       ligneSource[9],
       'Annulation – ' + String(ligneSource[10] || '').trim(),
       ligneSource[11],
-      'Oui'
+      'Oui',
+      '',
+      String(ligneSource[14] || '').trim(),
+      String(ligneSource[15] || '').trim()
     ]]);
 
     cible
       .getCell(1, 4)
       .setNumberFormat('@')
       .setValue(String(ligneSource[3] || '').trim());
+
+    if (String(ligneSource[14] || '').trim()) {
+      cible.getCell(1, 15).setNumberFormat('@')
+        .setValue(String(ligneSource[14] || '').trim());
+    }
   });
 
   return ecrituresAInverser.length;
@@ -812,7 +820,7 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
   const importBancaire = obtenirFeuilleMixte_(ss, 'Import bancaire');
   const repartition = obtenirFeuilleMixte_(ss, 'Répartition');
   const valeurs = importBancaire
-    .getRange(ligneImport, 1, 1, 15)
+    .getRange(ligneImport, 1, 1, 19)
     .getValues()[0];
 
   const idImport = String(valeurs[0] || '').trim();
@@ -845,6 +853,53 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
   if (montant < 0) {
     const donneesComptes = obtenirComptesDépensePourMixte_(ss);
 
+    let idFournisseur = '';
+    let nomFournisseur = '';
+    let idContact = '';
+    let nomContact = '';
+    let regle = null;
+
+    // Révision : priorité aux valeurs confirmées de la Transaction active (R:S:T, D)
+    if (modeRevision && idTransactionSource) {
+      const ligneSourceTx = trouverTransactionActivePourRevision_(
+        ss,
+        idTransactionSource
+      );
+      if (ligneSourceTx) {
+        idFournisseur = String(ligneSourceTx[17] || '').trim(); // col R
+        nomFournisseur = String(ligneSourceTx[18] || '').trim(); // col S
+        idContact = String(ligneSourceTx[19] || '').trim();     // col T
+        nomContact = String(ligneSourceTx[3] || '').trim();     // col D
+      }
+    }
+
+    // Fallback : suggestions Import bancaire P:S, puis règle bancaire, puis FOU-0000
+    if (!idFournisseur) {
+      const idFournisseurSuggere = String(valeurs[15] || '').trim();
+      const nomFournisseurSuggere = String(valeurs[16] || '').trim();
+      const idContactSuggere = String(valeurs[17] || '').trim();
+      const nomContactSuggere = String(valeurs[18] || '').trim();
+
+      if (!idFournisseurSuggere) {
+        regle = rechercherRegleBancaire_(
+          ss,
+          String(valeurs[2] || '').trim(),
+          montant
+        );
+      }
+
+      idFournisseur = idFournisseurSuggere || (regle ? regle.idFournisseur : '');
+      nomFournisseur = nomFournisseurSuggere || (regle ? regle.nomFournisseur : '');
+      idContact = idContactSuggere || (regle ? regle.idContact : '');
+      nomContact = nomContactSuggere || (regle ? regle.nomContact : '');
+
+      // FOU-0000 si aucun fournisseur identifié
+      if (!idFournisseur) {
+        idFournisseur = 'FOU-0000';
+        nomFournisseur = obtenirNomFournisseur_(ss, 'FOU-0000') || 'À déterminer';
+      }
+    }
+
     const lignesExistantesDepense = lireLignesActivesRepartitionMixte_(
       repartition,
       idImport
@@ -860,6 +915,15 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
           montant: Number(ligne.valeurs[7] || 0)
         };
       });
+
+    const lignesDefaut = lignesExistantesDepense.length
+      ? lignesExistantesDepense
+      : [{
+          compte: regle ? (regle.codeCompte || '') : '',
+          programme: regle ? (regle.programme || '') : '',
+          projet: '',
+          montant: 0
+        }];
 
     return {
       typeMouvement: 'depense',
@@ -883,9 +947,13 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
       comptes: donneesComptes.comptes,
       programmes: donneesComptes.programmes,
       projets: donneesComptes.projets,
-      lignes: lignesExistantesDepense.length
-        ? lignesExistantesDepense
-        : [{ compte: '', programme: '', projet: '', montant: 0 }]
+      fournisseurs: chargerFournisseursActifs_(ss),
+      contacts: chargerTousContacts_(ss),
+      idFournisseur: idFournisseur,
+      nomFournisseur: nomFournisseur,
+      idContact: idContact,
+      nomContact: nomContact,
+      lignes: lignesDefaut
     };
   }
 
@@ -2076,7 +2144,9 @@ function ecrireLigneJournalMixte_(
   credit,
   programme,
   projet,
-  description
+  description,
+  idFournisseur,
+  nomFournisseur
 ) {
   const compte = planComptable[codeCompte];
 
@@ -2109,6 +2179,12 @@ function ecrireLigneJournalMixte_(
     '',
     'Oui'
   ]]);
+
+  // Colonnes O (15) et P (16) : ID fournisseur et nom fournisseur
+  if (idFournisseur) {
+    feuille.getRange(ligne, 15).setNumberFormat('@').setValue(String(idFournisseur));
+    feuille.getRange(ligne, 16).setValue(String(nomFournisseur || ''));
+  }
 }
 
 function creerForfaitDepuisRepartitionMixte_(
@@ -2437,11 +2513,11 @@ function nettoyerTraitementPartielMixte_(
   }
 
   lignesTransactions.forEach(function(numeroLigne) {
-    transactions.getRange(numeroLigne, 1, 1, 17).clearContent();
+    transactions.getRange(numeroLigne, 1, 1, 20).clearContent(); // A:T
   });
 
   lignesJournal.forEach(function(numeroLigne) {
-    journal.getRange(numeroLigne, 1, 1, 13).clearContent();
+    journal.getRange(numeroLigne, 1, 1, 16).clearContent();
   });
 
   lignesForfaits.forEach(function(numeroLigne) {
@@ -2678,6 +2754,34 @@ function arrondirMontantMixte_(montant) {
   return Math.round((Number(montant || 0) + Number.EPSILON) * 100) / 100;
 }
 
+// Retourne le tableau de valeurs (20 cols) de la Transaction active pour une révision.
+// Retourne null si introuvable ou si les colonnes ne sont pas encore installées.
+function trouverTransactionActivePourRevision_(ss, idTransactionSource) {
+  try {
+    const transactions = ss.getSheetByName('Transactions');
+    if (!transactions || transactions.getLastRow() < 6) {
+      return null;
+    }
+    const valeurs = transactions
+      .getRange(6, 1, transactions.getLastRow() - 5, 20)
+      .getValues();
+    for (let i = 0; i < valeurs.length; i += 1) {
+      const id = String(valeurs[i][0] || '').trim();
+      const statut = String(valeurs[i][14] || '').trim();
+      if (
+        id === idTransactionSource &&
+        statut !== 'Annulée' &&
+        statut !== 'Exemple'
+      ) {
+        return valeurs[i];
+      }
+    }
+  } catch (e) {
+    // Retourner null si les colonnes T ne sont pas encore installées
+  }
+  return null;
+}
+
 function obtenirComptesDépensePourMixte_(ss) {
   const configuration = obtenirFeuilleMixte_(ss, 'Configuration');
   const projets = ss.getSheetByName('Projets');
@@ -2790,7 +2894,12 @@ function enregistrerEtComptabiliserDepenseBancaireMixte(donnees) {
       { conserverHistorique: false }
     );
 
-    const resultat = finaliserDepenseMixteParId_(contexte.idImport, {});
+    const resultat = finaliserDepenseMixteParId_(contexte.idImport, {
+      idFournisseur: contexte.idFournisseur,
+      nomFournisseur: contexte.nomFournisseur,
+      idContact: contexte.idContact,
+      nomContact: contexte.nomContact
+    });
 
     return {
       succes: true,
@@ -2844,7 +2953,11 @@ function enregistrerRevisionDepenseBancaireMixte(donnees) {
 
     const resultat = finaliserDepenseMixteParId_(contexte.idImport, {
       idGroupeForce: contexte.idGroupeCible,
-      idRevisionSource: idRevisionSource
+      idRevisionSource: idRevisionSource,
+      idFournisseur: contexte.idFournisseur,
+      nomFournisseur: contexte.nomFournisseur,
+      idContact: contexte.idContact,
+      nomContact: contexte.nomContact
     });
 
     return {
@@ -3060,13 +3173,21 @@ function preparerContexteDepenseMixte_(donnees, options) {
 
   validerAbsenceConflitIdGroupeMixte_(transactions, idGroupeCible);
 
+  const idFournisseur = String(donnees.idFournisseur || '').trim();
+  const idContact = String(donnees.idContact || '').trim();
+  const infosFC = validerFournisseurEtContact_(ss, idFournisseur, idContact);
+
   return {
     idImport: idImport,
     idTransactionSource: idTransactionSource,
     idGroupeCible: idGroupeCible,
     valeursImport: valeursImport,
     lignes: lignes,
-    repartition: repartition
+    repartition: repartition,
+    idFournisseur: infosFC.idFournisseur,
+    nomFournisseur: infosFC.nomFournisseur,
+    idContact: infosFC.idContact,
+    nomContact: infosFC.nomContact
   };
 }
 
@@ -3192,6 +3313,10 @@ function finaliserDepenseMixteParId_(idImport, options) {
   const optionsFinalisation = options || {};
   const idGroupeForce = String(optionsFinalisation.idGroupeForce || '').trim();
   const idRevisionSource = String(optionsFinalisation.idRevisionSource || '').trim();
+  const idFournisseur = String(optionsFinalisation.idFournisseur || '').trim();
+  const nomFournisseur = String(optionsFinalisation.nomFournisseur || '').trim();
+  const idContact = String(optionsFinalisation.idContact || '').trim();
+  const nomContact = String(optionsFinalisation.nomContact || '').trim();
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const repartition = obtenirFeuilleMixte_(ss, 'Répartition');
@@ -3333,7 +3458,11 @@ function finaliserDepenseMixteParId_(idImport, options) {
       codeCompte,
       programme,
       projet,
-      idImport
+      idImport,
+      nomContact,
+      idFournisseur,
+      nomFournisseur,
+      idContact
     );
 
     transactionsCreees.push({ idTransaction: idTransaction, ligne: ligneTransaction });
@@ -3348,7 +3477,9 @@ function finaliserDepenseMixteParId_(idImport, options) {
         montant: montantLigne,
         programme: programme,
         projet: projet,
-        description: descriptionBancaire
+        description: descriptionBancaire,
+        idFournisseur: idFournisseur,
+        nomFournisseur: nomFournisseur
       }
     );
   });
@@ -3365,6 +3496,18 @@ function finaliserDepenseMixteParId_(idImport, options) {
   importBancaire.getRange(ligneImport, 10).setValue(idGroupe);
   importBancaire.getRange(ligneImport, 11).setValue('Classée');
   importBancaire.getRange(ligneImport, 13).setValue(nouvelleNote);
+
+  // P:Q toujours écrits avec le fournisseur confirmé (obligatoire)
+  importBancaire.getRange(ligneImport, 16).setNumberFormat('@').setValue(idFournisseur);
+  importBancaire.getRange(ligneImport, 17).setValue(nomFournisseur);
+
+  // R:S selon contact ; vider si absent pour ne pas laisser d'ancienne suggestion
+  if (idContact) {
+    importBancaire.getRange(ligneImport, 18).setNumberFormat('@').setValue(idContact);
+    importBancaire.getRange(ligneImport, 19).setValue(nomContact);
+  } else {
+    importBancaire.getRange(ligneImport, 18, 1, 2).clearContent();
+  }
 
   if (idRevisionSource) {
     transactionsCreees.forEach(function(item) {
@@ -3388,7 +3531,11 @@ function ecrireTransactionDepenseMixte_(
   codeCompte,
   programme,
   projet,
-  idImport
+  idImport,
+  nomContact,
+  idFournisseur,
+  nomFournisseur,
+  idContact
 ) {
   const compte = obtenirCompteConfigurationMixte_(codeCompte);
   const ligne = prochaineLigneVideMixte_(feuille, 6);
@@ -3412,7 +3559,7 @@ function ecrireTransactionDepenseMixte_(
     idTransaction,
     dateTransaction,
     'Dépense',
-    '',
+    String(nomContact || ''),
     description,
     arrondirMontantMixte_(montant),
     compte.valeurCode,
@@ -3430,6 +3577,17 @@ function ecrireTransactionDepenseMixte_(
 
   cible.getCell(1, 7).setNumberFormat('@').setValue(String(compte.valeurCode));
 
+  // Colonnes R (18) et S (19) : ID fournisseur et nom fournisseur
+  if (idFournisseur) {
+    feuille.getRange(ligne, 18).setNumberFormat('@').setValue(String(idFournisseur));
+    feuille.getRange(ligne, 19).setValue(String(nomFournisseur || ''));
+  }
+
+  // Colonne T (20) : ID contact
+  if (idContact) {
+    feuille.getRange(ligne, 20).setNumberFormat('@').setValue(String(idContact));
+  }
+
   return ligne;
 }
 
@@ -3444,13 +3602,16 @@ function ecrirePaireJournalDepenseMixte_(
   const programme = ecriture.programme || '';
   const projet = ecriture.projet || '';
   const description = ecriture.description || '';
+  const idFournisseur = String(ecriture.idFournisseur || '').trim();
+  const nomFournisseur = String(ecriture.nomFournisseur || '').trim();
 
   ecrireLigneJournalMixte_(
     journal, planComptable,
     'ECR-' + idTransaction + '-D',
     idTransaction, dateTransaction,
     ecriture.codeCompte, montant, 0,
-    programme, projet, description
+    programme, projet, description,
+    idFournisseur, nomFournisseur
   );
 
   ecrireLigneJournalMixte_(
@@ -3458,6 +3619,7 @@ function ecrirePaireJournalDepenseMixte_(
     'ECR-' + idTransaction + '-C',
     idTransaction, dateTransaction,
     '1000', 0, montant,
-    programme, projet, description
+    programme, projet, description,
+    idFournisseur, nomFournisseur
   );
 }

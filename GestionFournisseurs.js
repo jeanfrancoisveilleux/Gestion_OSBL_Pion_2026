@@ -1,0 +1,660 @@
+// ─── Installer public ────────────────────────────────────────────────────────
+
+function installerGestionFournisseursContacts() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  installerOngletFournisseurs_(ss);
+  installerOngletContacts_(ss);
+  installerPlanComptableSupplementaire_(ss);
+  installerReglesBancaires_(ss);
+  installerColonnesFournisseurTransactions_(ss);
+  installerColonnesFournisseurJournal_(ss);
+  installerColonnesFournisseurImportBancaire_(ss);
+
+  SpreadsheetApp.getUi().alert(
+    'Gestion des fournisseurs et contacts installée avec succès.\n\n' +
+    'Onglets créés : Fournisseurs, Contacts.\n' +
+    'Comptes ajoutés : 4080, 6065 (si absents).\n' +
+    'Règles bancaires configurées dans Configuration!T:Z.\n' +
+    'Colonnes fournisseur ajoutées dans Transactions (R:S), Journal (O:P) ' +
+    'et Import bancaire (P:S).'
+  );
+}
+
+// ─── Onglet Fournisseurs ──────────────────────────────────────────────────────
+
+function installerOngletFournisseurs_(ss) {
+  let feuille = ss.getSheetByName('Fournisseurs');
+
+  if (!feuille) {
+    feuille = ss.insertSheet('Fournisseurs');
+    feuille.setHiddenGridlines(true);
+  }
+
+  // En-tête de section (ligne 1)
+  if (!String(feuille.getRange(1, 1).getValue() || '').trim()) {
+    feuille.getRange('A1:K1').merge()
+      .setValue('Fournisseurs')
+      .setBackground('#e8f0fe')
+      .setFontWeight('bold');
+  }
+
+  // En-têtes de colonnes (ligne 5)
+  const entetes = [
+    'ID fournisseur', 'Fournisseur', 'Nom légal', 'Courriel général',
+    'Téléphone', 'Adresse', 'Ville', 'Province', 'Code postal', 'Actif', 'Notes'
+  ];
+
+  const cellEntetes = feuille.getRange(5, 1, 1, entetes.length);
+
+  if (!String(cellEntetes.getValues()[0][0] || '').trim()) {
+    cellEntetes
+      .setValues([entetes])
+      .setBackground('#f1f3f4')
+      .setFontWeight('bold')
+      .setWrap(true);
+  }
+
+  // Fournisseurs initiaux
+  const fournisseursInitiaux = [
+    ['FOU-0000', 'À déterminer'],
+    ['FOU-0001', 'Desjardins'],
+    ['FOU-0002', 'Infini-jeux'],
+    ['FOU-0003', 'Cartier Resto-Bar'],
+    ['FOU-0004', 'Tim Hortons'],
+    ['FOU-0005', "Boutique L'Imaginaire"],
+    ['FOU-0006', 'Amusement Jacques-Cartier'],
+    ['FOU-0007', 'Au Chalet en bois rond']
+  ];
+
+  const idsExistants = new Set();
+  const derniereLigne = feuille.getLastRow();
+
+  if (derniereLigne >= 6) {
+    feuille.getRange(6, 1, derniereLigne - 5, 1)
+      .getDisplayValues()
+      .forEach(function(ligne) {
+        const id = String(ligne[0] || '').trim();
+        if (id) { idsExistants.add(id); }
+      });
+  }
+
+  fournisseursInitiaux.forEach(function(f) {
+    if (!idsExistants.has(f[0])) {
+      const lg = prochaineLigneLibre_(feuille, 1, 6);
+      feuille.getRange(lg, 1).setNumberFormat('@').setValue(f[0]);
+      feuille.getRange(lg, 2).setValue(f[1]);
+      feuille.getRange(lg, 10).setValue('Oui');
+    }
+  });
+
+  if (!feuille.getFrozenRows()) {
+    feuille.setFrozenRows(5);
+  }
+
+  const largeurs = [130, 200, 200, 175, 120, 180, 120, 90, 100, 70, 200];
+  largeurs.forEach(function(largeur, index) {
+    feuille.setColumnWidth(index + 1, largeur);
+  });
+}
+
+// ─── Onglet Contacts ──────────────────────────────────────────────────────────
+
+function installerOngletContacts_(ss) {
+  let feuille = ss.getSheetByName('Contacts');
+
+  if (!feuille) {
+    feuille = ss.insertSheet('Contacts');
+    feuille.setHiddenGridlines(true);
+  }
+
+  // En-tête de section (ligne 1)
+  if (!String(feuille.getRange(1, 1).getValue() || '').trim()) {
+    feuille.getRange('A1:N1').merge()
+      .setValue('Contacts')
+      .setBackground('#e8f0fe')
+      .setFontWeight('bold');
+  }
+
+  // En-têtes de colonnes (ligne 5)
+  const entetes = [
+    'ID contact', 'ID fournisseur', 'Fournisseur', 'Nom du contact',
+    'Fonction', 'Courriel', 'Téléphone', 'Adresse',
+    'Ville', 'Province', 'Code postal', 'Contact principal', 'Actif', 'Notes'
+  ];
+
+  const cellEntetes = feuille.getRange(5, 1, 1, entetes.length);
+
+  if (!String(cellEntetes.getValues()[0][0] || '').trim()) {
+    cellEntetes
+      .setValues([entetes])
+      .setBackground('#f1f3f4')
+      .setFontWeight('bold')
+      .setWrap(true);
+  }
+
+  // Contact initial CON-0001
+  const idsExistants = new Set();
+  const derniereLigne = feuille.getLastRow();
+
+  if (derniereLigne >= 6) {
+    feuille.getRange(6, 1, derniereLigne - 5, 1)
+      .getDisplayValues()
+      .forEach(function(ligne) {
+        const id = String(ligne[0] || '').trim();
+        if (id) { idsExistants.add(id); }
+      });
+  }
+
+  if (!idsExistants.has('CON-0001')) {
+    const lg = prochaineLigneLibre_(feuille, 1, 6);
+    feuille.getRange(lg, 1).setNumberFormat('@').setValue('CON-0001');
+    feuille.getRange(lg, 2).setNumberFormat('@').setValue('FOU-0006');
+    feuille.getRange(lg, 3).setValue('Amusement Jacques-Cartier');
+    feuille.getRange(lg, 4).setValue('Jean-François Bertrand');
+    feuille.getRange(lg, 12).setValue('Oui'); // Contact principal
+    feuille.getRange(lg, 13).setValue('Oui'); // Actif
+  }
+
+  if (!feuille.getFrozenRows()) {
+    feuille.setFrozenRows(5);
+  }
+
+  const largeurs = [110, 120, 200, 200, 150, 175, 120, 175, 120, 90, 100, 120, 70, 200];
+  largeurs.forEach(function(largeur, index) {
+    feuille.setColumnWidth(index + 1, largeur);
+  });
+}
+
+// ─── Plan comptable supplémentaire ───────────────────────────────────────────
+
+function installerPlanComptableSupplementaire_(ss) {
+  const config = ss.getSheetByName('Configuration');
+
+  if (!config) {
+    throw new Error("L'onglet Configuration est introuvable.");
+  }
+
+  const comptes = [
+    ['4080', "Revenus d'intérêts et ristournes", 'Revenu', 'Autres', 'Oui'],
+    ['6065', 'Hébergement et nuitées', 'Dépense', 'Administration', 'Oui']
+  ];
+
+  const derniereLigne = config.getLastRow();
+  const codesExistants = new Set();
+
+  if (derniereLigne >= 6) {
+    config.getRange(6, 1, derniereLigne - 5, 1)
+      .getDisplayValues()
+      .forEach(function(ligne) {
+        const code = String(ligne[0] || '').trim();
+        if (code) { codesExistants.add(code); }
+      });
+  }
+
+  comptes.forEach(function(compte) {
+    if (!codesExistants.has(compte[0])) {
+      const lg = prochaineLigneLibre_(config, 1, 6);
+      config.getRange(lg, 1, 1, 5).setValues([compte]);
+      config.getRange(lg, 1).setNumberFormat('@').setValue(compte[0]);
+    }
+  });
+}
+
+// ─── Règles bancaires (Configuration!T:Z) ────────────────────────────────────
+
+function installerReglesBancaires_(ss) {
+  const config = ss.getSheetByName('Configuration');
+
+  if (!config) {
+    throw new Error("L'onglet Configuration est introuvable.");
+  }
+
+  // T4 = identifiant de section
+  if (!String(config.getRange(4, 20).getValue() || '').trim()) {
+    config.getRange(4, 20).setValue('Règles bancaires')
+      .setBackground('#e8f0fe')
+      .setFontWeight('bold');
+  }
+
+  // En-têtes ligne 5 (T5:Z5)
+  const entetes = [
+    'Sens', 'Texte à reconnaître', 'ID fournisseur',
+    'ID contact par défaut', 'Code compte', 'Programme', 'Actif'
+  ];
+
+  const cellEntetes = config.getRange(5, 20, 1, 7);
+
+  if (!String(cellEntetes.getValues()[0][0] || '').trim()) {
+    cellEntetes
+      .setValues([entetes])
+      .setBackground('#f1f3f4')
+      .setFontWeight('bold')
+      .setWrap(true);
+  }
+
+  const regles = [
+    ['Sortie', 'Virement Interac à /JEAN-FRANCOIS /', 'FOU-0002', '', '6000', 'Pion joues-tu?', 'Oui'],
+    ['Sortie', 'Achat /CARTIER RESTO B', 'FOU-0003', '', '6130', 'Pion joues-tu? – Cartier', 'Oui'],
+    ['Sortie', 'Achat /TIM HORTONS', 'FOU-0004', '', '6130', '', 'Oui'],
+    ['Sortie', "Achat /L'IMAGINAIRE", 'FOU-0005', '', '', '', 'Oui'],
+    ['Sortie', 'Virement Interac à /Amusement Jacq/', 'FOU-0006', 'CON-0001', '6010', 'Pion joues-tu?', 'Oui'],
+    ['Sortie', "Frais fixes d'utilisation", 'FOU-0001', '', '6100', 'Administration générale', 'Oui'],
+    ["Sortie", "Frais d'utilisation", 'FOU-0001', '', '6100', 'Administration générale', 'Oui'],
+    ['Sortie', 'Achat /MS AUCHALETENBOISRON', 'FOU-0007', '', '6020', 'Pion des bois', 'Oui'],
+    ['Entrée', 'Ristourne', 'FOU-0001', '', '4080', 'Administration générale', 'Oui']
+  ];
+
+  // Lire les textes existants (col U = col 21, index 1 dans la plage T:Z)
+  const derniereLigne = config.getLastRow();
+  const textesExistants = new Set();
+
+  if (derniereLigne >= 6) {
+    config.getRange(6, 21, derniereLigne - 5, 1)
+      .getDisplayValues()
+      .forEach(function(ligne) {
+        const texte = String(ligne[0] || '').trim().toLowerCase();
+        if (texte) { textesExistants.add(texte); }
+      });
+  }
+
+  // Trouver la première ligne vide dans la section T:Z
+  let ligneEcriture = 6;
+
+  if (derniereLigne >= 6) {
+    const valeursT = config.getRange(6, 20, derniereLigne - 5, 1).getDisplayValues();
+    for (let i = 0; i < valeursT.length; i += 1) {
+      if (!String(valeursT[i][0] || '').trim()) {
+        ligneEcriture = i + 6;
+        break;
+      }
+      ligneEcriture = i + 7;
+    }
+  }
+
+  regles.forEach(function(regle) {
+    const texteNorm = regle[1].toLowerCase();
+
+    if (!textesExistants.has(texteNorm)) {
+      config.getRange(ligneEcriture, 20, 1, 7).setValues([regle]);
+      config.getRange(ligneEcriture, 22).setNumberFormat('@'); // ID fournisseur
+      config.getRange(ligneEcriture, 23).setNumberFormat('@'); // ID contact
+      config.getRange(ligneEcriture, 24).setNumberFormat('@'); // Code compte
+      textesExistants.add(texteNorm);
+      ligneEcriture += 1;
+    }
+  });
+}
+
+// ─── Colonnes de synchronisation ─────────────────────────────────────────────
+
+function installerColonnesFournisseurTransactions_(ss) {
+  const feuille = ss.getSheetByName('Transactions');
+
+  if (!feuille) {
+    return;
+  }
+
+  // R5 : ID fournisseur, S5 : Fournisseur
+  if (!String(feuille.getRange(5, 18).getValue() || '').trim()) {
+    feuille.getRange(5, 18).setValue('ID fournisseur')
+      .setBackground('#f1f3f4')
+      .setFontWeight('bold')
+      .setWrap(true);
+  }
+
+  if (!String(feuille.getRange(5, 19).getValue() || '').trim()) {
+    feuille.getRange(5, 19).setValue('Fournisseur')
+      .setBackground('#f1f3f4')
+      .setFontWeight('bold')
+      .setWrap(true);
+  }
+
+  if (!String(feuille.getRange(5, 20).getValue() || '').trim()) {
+    feuille.getRange(5, 20).setValue('ID contact')
+      .setBackground('#f1f3f4')
+      .setFontWeight('bold')
+      .setWrap(true);
+  }
+
+  feuille.setColumnWidth(18, 110);
+  feuille.setColumnWidth(19, 200);
+  feuille.setColumnWidth(20, 110);
+}
+
+function installerColonnesFournisseurJournal_(ss) {
+  const feuille = ss.getSheetByName('Journal');
+
+  if (!feuille) {
+    return;
+  }
+
+  // O5 : ID fournisseur, P5 : Fournisseur
+  if (!String(feuille.getRange(5, 15).getValue() || '').trim()) {
+    feuille.getRange(5, 15).setValue('ID fournisseur')
+      .setBackground('#f1f3f4')
+      .setFontWeight('bold')
+      .setWrap(true);
+  }
+
+  if (!String(feuille.getRange(5, 16).getValue() || '').trim()) {
+    feuille.getRange(5, 16).setValue('Fournisseur')
+      .setBackground('#f1f3f4')
+      .setFontWeight('bold')
+      .setWrap(true);
+  }
+
+  feuille.setColumnWidth(15, 110);
+  feuille.setColumnWidth(16, 200);
+}
+
+function installerColonnesFournisseurImportBancaire_(ss) {
+  const feuille = ss.getSheetByName('Import bancaire');
+
+  if (!feuille) {
+    return;
+  }
+
+  // P5:S5 : suggestions fournisseur/contact
+  const entetes = [
+    [
+      'ID fournisseur suggéré',
+      'Fournisseur suggéré',
+      'ID contact suggéré',
+      'Contact suggéré'
+    ]
+  ];
+
+  const cellEntetes = feuille.getRange(5, 16, 1, 4);
+
+  if (!String(cellEntetes.getValues()[0][0] || '').trim()) {
+    cellEntetes
+      .setValues(entetes)
+      .setBackground('#f1f3f4')
+      .setFontWeight('bold')
+      .setWrap(true);
+
+    feuille.setColumnWidth(16, 130);
+    feuille.setColumnWidth(17, 180);
+    feuille.setColumnWidth(18, 130);
+    feuille.setColumnWidth(19, 180);
+  }
+}
+
+// ─── Accès aux données (utilisé par FinalisationMixtes.js et ImportCsv.js) ───
+
+function chargerFournisseursActifs_(ss) {
+  const feuille = ss.getSheetByName('Fournisseurs');
+
+  if (!feuille || feuille.getLastRow() < 6) {
+    return [];
+  }
+
+  return feuille
+    .getRange(6, 1, feuille.getLastRow() - 5, 10)
+    .getValues()
+    .filter(function(ligne) {
+      return (
+        String(ligne[0] || '').trim() &&
+        String(ligne[9] || '').trim() === 'Oui'
+      );
+    })
+    .map(function(ligne) {
+      return {
+        id: String(ligne[0]).trim(),
+        nom: String(ligne[1] || '').trim()
+      };
+    });
+}
+
+function chargerTousContacts_(ss) {
+  const feuille = ss.getSheetByName('Contacts');
+
+  if (!feuille || feuille.getLastRow() < 6) {
+    return [];
+  }
+
+  return feuille
+    .getRange(6, 1, feuille.getLastRow() - 5, 13)
+    .getValues()
+    .filter(function(ligne) {
+      return (
+        String(ligne[0] || '').trim() &&
+        String(ligne[12] || '').trim() === 'Oui'
+      );
+    })
+    .map(function(ligne) {
+      return {
+        id: String(ligne[0]).trim(),
+        idFournisseur: String(ligne[1] || '').trim(),
+        nom: String(ligne[3] || '').trim()
+      };
+    });
+}
+
+function obtenirNomFournisseur_(ss, idFournisseur) {
+  if (!idFournisseur) {
+    return '';
+  }
+
+  const feuille = ss.getSheetByName('Fournisseurs');
+
+  if (!feuille || feuille.getLastRow() < 6) {
+    return idFournisseur;
+  }
+
+  const valeurs = feuille
+    .getRange(6, 1, feuille.getLastRow() - 5, 2)
+    .getDisplayValues();
+
+  for (let i = 0; i < valeurs.length; i += 1) {
+    if (String(valeurs[i][0] || '').trim() === idFournisseur) {
+      return String(valeurs[i][1] || '').trim();
+    }
+  }
+
+  return idFournisseur;
+}
+
+function obtenirNomContact_(ss, idContact) {
+  if (!idContact) {
+    return '';
+  }
+
+  const feuille = ss.getSheetByName('Contacts');
+
+  if (!feuille || feuille.getLastRow() < 6) {
+    return '';
+  }
+
+  const valeurs = feuille
+    .getRange(6, 1, feuille.getLastRow() - 5, 4)
+    .getDisplayValues();
+
+  for (let i = 0; i < valeurs.length; i += 1) {
+    if (String(valeurs[i][0] || '').trim() === idContact) {
+      return String(valeurs[i][3] || '').trim();
+    }
+  }
+
+  return '';
+}
+
+function normaliserTexteRechercheRegle_(texte) {
+  return String(texte || '')
+    .toLowerCase()
+    .replace(/[àâä]/g, 'a')
+    .replace(/[éèêë]/g, 'e')
+    .replace(/[îï]/g, 'i')
+    .replace(/[ôö]/g, 'o')
+    .replace(/[ùûü]/g, 'u')
+    .replace(/[ç]/g, 'c')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function rechercherRegleBancaire_(ss, description, montant) {
+  const config = ss.getSheetByName('Configuration');
+
+  if (!config || config.getLastRow() < 6) {
+    return null;
+  }
+
+  // Règles en T6:Z<derniereLigne> (cols 20-26, 7 colonnes)
+  const derniereLigne = config.getLastRow();
+
+  if (derniereLigne < 6) {
+    return null;
+  }
+
+  const plage = config
+    .getRange(6, 20, derniereLigne - 5, 7)
+    .getValues();
+
+  const sensRecherche = montant < 0 ? 'Sortie' : 'Entrée';
+  const descNormalisee = normaliserTexteRechercheRegle_(description);
+
+  for (let i = 0; i < plage.length; i += 1) {
+    const ligne = plage[i];
+    const sens = String(ligne[0] || '').trim();
+    const texte = String(ligne[1] || '').trim();
+    const actif = String(ligne[6] || '').trim();
+
+    if (!actif || actif !== 'Oui') {
+      continue;
+    }
+
+    if (sens !== sensRecherche) {
+      continue;
+    }
+
+    if (!texte) {
+      continue;
+    }
+
+    if (descNormalisee.indexOf(normaliserTexteRechercheRegle_(texte)) === -1) {
+      continue;
+    }
+
+    const idFournisseur = String(ligne[2] || '').trim();
+    const idContact = String(ligne[3] || '').trim();
+    const codeCompte = String(ligne[4] || '').trim();
+    const programme = String(ligne[5] || '').trim();
+
+    return {
+      idFournisseur: idFournisseur,
+      nomFournisseur: obtenirNomFournisseur_(ss, idFournisseur),
+      idContact: idContact,
+      nomContact: obtenirNomContact_(ss, idContact),
+      codeCompte: codeCompte,
+      programme: programme
+    };
+  }
+
+  return null;
+}
+
+function validerFournisseurEtContact_(ss, idFournisseur, idContact) {
+  if (!idFournisseur) {
+    throw new Error('Le fournisseur est obligatoire.');
+  }
+
+  const feuilleF = ss.getSheetByName('Fournisseurs');
+
+  if (!feuilleF || feuilleF.getLastRow() < 6) {
+    throw new Error("L'onglet Fournisseurs est introuvable ou vide.");
+  }
+
+  const valeursF = feuilleF
+    .getRange(6, 1, feuilleF.getLastRow() - 5, 10)
+    .getValues();
+
+  let fournisseurTrouve = null;
+
+  for (let i = 0; i < valeursF.length; i += 1) {
+    const id = String(valeursF[i][0] || '').trim();
+
+    if (id !== idFournisseur) {
+      continue;
+    }
+
+    const actif = String(valeursF[i][9] || '').trim();
+
+    if (actif !== 'Oui') {
+      throw new Error(
+        'Le fournisseur ' + idFournisseur + ' n\'est pas actif.'
+      );
+    }
+
+    fournisseurTrouve = {
+      id: id,
+      nom: String(valeursF[i][1] || '').trim()
+    };
+
+    break;
+  }
+
+  if (!fournisseurTrouve) {
+    throw new Error(
+      'Le fournisseur ' + idFournisseur + ' est introuvable.'
+    );
+  }
+
+  let contactTrouve = { id: '', nom: '' };
+
+  if (idContact) {
+    const feuilleC = ss.getSheetByName('Contacts');
+
+    if (!feuilleC || feuilleC.getLastRow() < 6) {
+      throw new Error("L'onglet Contacts est introuvable ou vide.");
+    }
+
+    const valeursC = feuilleC
+      .getRange(6, 1, feuilleC.getLastRow() - 5, 13)
+      .getValues();
+
+    let contactValide = false;
+
+    for (let i = 0; i < valeursC.length; i += 1) {
+      const idC = String(valeursC[i][0] || '').trim();
+
+      if (idC !== idContact) {
+        continue;
+      }
+
+      const idF = String(valeursC[i][1] || '').trim();
+
+      if (idF !== idFournisseur) {
+        throw new Error(
+          'Le contact ' + idContact +
+          ' n\'appartient pas au fournisseur ' + idFournisseur + '.'
+        );
+      }
+
+      const actifC = String(valeursC[i][12] || '').trim();
+
+      if (actifC !== 'Oui') {
+        throw new Error('Le contact ' + idContact + ' n\'est pas actif.');
+      }
+
+      contactTrouve = {
+        id: idC,
+        nom: String(valeursC[i][3] || '').trim()
+      };
+
+      contactValide = true;
+      break;
+    }
+
+    if (!contactValide) {
+      throw new Error('Le contact ' + idContact + ' est introuvable.');
+    }
+  }
+
+  return {
+    idFournisseur: fournisseurTrouve.id,
+    nomFournisseur: fournisseurTrouve.nom,
+    idContact: contactTrouve.id,
+    nomContact: contactTrouve.nom
+  };
+}

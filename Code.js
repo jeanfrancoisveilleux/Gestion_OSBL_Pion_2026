@@ -23,6 +23,11 @@ function onOpen() {
     )
     .addSeparator()
     .addItem(
+      'Installer Fournisseurs et Contacts',
+      'installerGestionFournisseursContacts'
+    )
+    .addSeparator()
+    .addItem(
       'Initialiser les dossiers Drive',
       'initialiserDossiersDrive'
     )

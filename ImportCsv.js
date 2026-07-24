@@ -194,6 +194,14 @@ function importerCsvDesjardins(contenu, nomFichier) {
     )
     .setNumberFormat('yyyy-mm-dd hh:mm');
 
+  // Appliquer les règles bancaires aux nouvelles lignes (colonnes P:S)
+  appliquerReglesBancairesImport_(
+    feuille,
+    ligneDepart,
+    nouvellesLignes.length,
+    classeur
+  );
+
   const premiereTransaction = nouvellesLignes[0];
   const derniereTransaction =
     nouvellesLignes[nouvellesLignes.length - 1];
@@ -250,4 +258,42 @@ function calculerEmpreinte_(texte) {
       return ('0' + valeur.toString(16)).slice(-2);
     })
     .join('');
+}
+
+// Applique les règles bancaires aux nouvelles lignes importées (suggestions P:S).
+// Ne modifie pas les colonnes H, I ni les lignes déjà comptabilisées.
+// Ne fait jamais échouer l'import si les onglets ou la zone T:Z ne sont pas installés.
+function appliquerReglesBancairesImport_(feuille, ligneDepart, nombreLignes, classeur) {
+  if (!nombreLignes) return;
+
+  try {
+    const ss = classeur || SpreadsheetApp.getActive();
+    const donnees = feuille
+      .getRange(ligneDepart, 1, nombreLignes, 13)
+      .getValues();
+
+    for (let i = 0; i < nombreLignes; i++) {
+      const statut = String(donnees[i][10] || '').trim();
+      if (statut !== 'À classer') continue;
+
+      const description = String(donnees[i][2] || '').trim();
+      const montant = Number(donnees[i][3]) || 0;
+
+      const regle = rechercherRegleBancaire_(ss, description, montant);
+      if (!regle) continue;
+
+      const ligneSheet = ligneDepart + i;
+
+      if (regle.idFournisseur) {
+        feuille.getRange(ligneSheet, 16).setNumberFormat('@').setValue(regle.idFournisseur);
+        feuille.getRange(ligneSheet, 17).setValue(regle.nomFournisseur || '');
+      }
+      if (regle.idContact) {
+        feuille.getRange(ligneSheet, 18).setNumberFormat('@').setValue(regle.idContact);
+        feuille.getRange(ligneSheet, 19).setValue(regle.nomContact || '');
+      }
+    }
+  } catch (e) {
+    // Onglet Fournisseurs, Contacts ou Configuration!T:Z absent : ne pas bloquer l'import
+  }
 }

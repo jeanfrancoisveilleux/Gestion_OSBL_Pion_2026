@@ -223,6 +223,34 @@
 
       .principal:hover:not(:disabled) { background: var(--bleu-fonce); }
       .principal:disabled { background: #a9c7f5; cursor: default; }
+
+      .section-fc {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 16px;
+        padding: 14px;
+        border: 1px solid var(--bordure);
+        border-radius: 10px;
+        background: var(--fond);
+      }
+
+      .fc-groupe {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .fc-label {
+        font-size: 12px;
+        color: var(--secondaire);
+        font-weight: 600;
+      }
+
+      .fc-label .requis {
+        color: var(--rouge);
+        margin-left: 2px;
+      }
     </style>
   </head>
   <body>
@@ -243,6 +271,21 @@
       <div>
         <div class="etiquette" style="text-align:right">Montant</div>
         <div class="montant-bancaire" id="montantBancaire"></div>
+      </div>
+    </div>
+
+    <div id="sectionFournisseur" style="display:none">
+      <div class="section-fc">
+        <div class="fc-groupe">
+          <label class="fc-label" for="selFournisseur">
+            Fournisseur<span class="requis">*</span>
+          </label>
+          <select id="selFournisseur"></select>
+        </div>
+        <div class="fc-groupe">
+          <label class="fc-label" for="selContact">Contact</label>
+          <select id="selContact"></select>
+        </div>
       </div>
     </div>
 
@@ -286,6 +329,8 @@
       const MAX_LIGNES = 5;
       const EST_DEPENSE = DONNEES.typeMouvement === 'depense';
       let lignes = [];
+      let idFournisseurSelectionne = '';
+      let idContactSelectionne = '';
 
       const formatMonetaire = new Intl.NumberFormat('fr-CA', {
         style: 'currency',
@@ -527,6 +572,81 @@
         calculerTotaux();
       }
 
+      /* ── Fournisseur / Contact (mode dépense) ───────────── */
+
+      function filtrerContacts(idFournisseur) {
+        const sel = document.getElementById('selContact');
+        // Utiliser la variable de module (pas sel.value) pour savoir quel contact garder
+        const valeurActuelle = idContactSelectionne;
+        sel.textContent = '';
+
+        const vide = document.createElement('option');
+        vide.value = '';
+        vide.textContent = '(Aucun)';
+        sel.appendChild(vide);
+
+        let trouve = false;
+        (DONNEES.contacts || [])
+          .filter(function(c) {
+            return !idFournisseur || c.idFournisseur === idFournisseur;
+          })
+          .forEach(function(c) {
+            const opt = document.createElement('option');
+            opt.value = c.id;
+            opt.textContent = c.nom;
+            if (c.id === valeurActuelle) {
+              opt.selected = true;
+              trouve = true;
+            }
+            sel.appendChild(opt);
+          });
+
+        // Si le contact actuel n'appartient pas au nouveau fournisseur, vider
+        if (!trouve) {
+          sel.value = '';
+          idContactSelectionne = '';
+        }
+      }
+
+      function initialiserSectionFournisseur() {
+        document.getElementById('sectionFournisseur').style.display = '';
+
+        const selF = document.getElementById('selFournisseur');
+        selF.textContent = '';
+
+        const vide = document.createElement('option');
+        vide.value = '';
+        vide.textContent = 'Sélectionner un fournisseur…';
+        selF.appendChild(vide);
+
+        (DONNEES.fournisseurs || []).forEach(function(f) {
+          const opt = document.createElement('option');
+          opt.value = f.id;
+          opt.textContent = f.id + ' – ' + f.nom;
+          opt.selected = f.id === (DONNEES.idFournisseur || '');
+          selF.appendChild(opt);
+        });
+
+        idFournisseurSelectionne = DONNEES.idFournisseur || '';
+        idContactSelectionne = DONNEES.idContact || '';
+
+        filtrerContacts(idFournisseurSelectionne);
+
+        const selC = document.getElementById('selContact');
+        selC.value = idContactSelectionne;
+
+        selF.addEventListener('change', function() {
+          idFournisseurSelectionne = selF.value;
+          // filtrerContacts gère le reset de idContactSelectionne si nécessaire
+          filtrerContacts(idFournisseurSelectionne);
+          calculerTotaux();
+        });
+
+        selC.addEventListener('change', function() {
+          idContactSelectionne = selC.value;
+        });
+      }
+
       /* ── Commun ──────────────────────────────────────────── */
 
       function creerBoutonSupprimer(index, apresSuppressionVide) {
@@ -563,9 +683,9 @@
           total = arrondir(total);
           const cible = arrondir(DONNEES.montantAbsolu || 0);
           const reste = arrondir(cible - total);
-          const lignesValides = lignes.length > 0 && lignes.every(l =>
-            l.compte && nombre(l.montant) > 0
-          );
+          const lignesValides = lignes.length > 0 &&
+            lignes.every(l => l.compte && nombre(l.montant) > 0) &&
+            !!idFournisseurSelectionne;
 
           mettreAJourAffichageTotaux(total, reste, lignesValides);
         } else {
@@ -643,6 +763,8 @@
           const donnees = {
             idImport: DONNEES.idImport,
             idTransactionSource: DONNEES.idTransactionSource || '',
+            idFournisseur: idFournisseurSelectionne,
+            idContact: idContactSelectionne,
             lignes: lignes.map(l => ({
               compte: l.compte,
               programme: l.programme || '',
@@ -714,6 +836,8 @@
           projet: l.projet || '',
           montant: nombre(l.montant || 0)
         }));
+
+        initialiserSectionFournisseur();
       } else {
         document.getElementById('enTetes').innerHTML =
           '<tr>' +
