@@ -355,30 +355,40 @@ function installerColonnesFournisseurImportBancaire_(ss) {
     return;
   }
 
-  // P5:S5 : suggestions fournisseur/contact
-  const entetes = [
-    [
-      'ID fournisseur suggéré',
-      'Fournisseur suggéré',
-      'ID contact suggéré',
-      'Contact suggéré'
-    ]
+  // Correspondance colonne → lettre pour les messages d'erreur
+  const lettreColonne = { 16: 'P', 17: 'Q', 18: 'R', 19: 'S' };
+
+  // P5:S5 corrigées cellule par cellule (idempotent)
+  const attendus = [
+    { col: 16, valeur: 'ID fournisseur suggéré', largeur: 130 },
+    { col: 17, valeur: 'Fournisseur suggéré',    largeur: 180 },
+    { col: 18, valeur: 'ID contact suggéré',     largeur: 130 },
+    { col: 19, valeur: 'Contact suggéré',         largeur: 180 }
   ];
 
-  const cellEntetes = feuille.getRange(5, 16, 1, 4);
+  attendus.forEach(function(entete) {
+    const cellule = feuille.getRange(5, entete.col);
+    const valeurActuelle = String(cellule.getValue() || '').trim();
 
-  if (!String(cellEntetes.getValues()[0][0] || '').trim()) {
-    cellEntetes
-      .setValues(entetes)
-      .setBackground('#f1f3f4')
-      .setFontWeight('bold')
-      .setWrap(true);
-
-    feuille.setColumnWidth(16, 130);
-    feuille.setColumnWidth(17, 180);
-    feuille.setColumnWidth(18, 130);
-    feuille.setColumnWidth(19, 180);
-  }
+    if (valeurActuelle === '') {
+      // Cellule vide : écrire l'en-tête avec la même mise en forme que les autres en-têtes de la ligne 5
+      cellule
+        .setValue(entete.valeur)
+        .setBackground('#f1f3f4')
+        .setFontWeight('bold')
+        .setWrap(true);
+      feuille.setColumnWidth(entete.col, entete.largeur);
+    } else if (valeurActuelle === entete.valeur) {
+      // Déjà correct : ne rien faire
+    } else {
+      throw new Error(
+        'Import bancaire : la cellule ' +
+        lettreColonne[entete.col] + '5 contient « ' + valeurActuelle +
+        ' » au lieu de « ' + entete.valeur +
+        ' ». Corrigez manuellement avant de relancer l\'installeur.'
+      );
+    }
+  });
 }
 
 // ─── Accès aux données (utilisé par FinalisationMixtes.js et ImportCsv.js) ───
