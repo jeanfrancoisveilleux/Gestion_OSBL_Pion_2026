@@ -3497,6 +3497,9 @@ function finaliserDepenseMixteParId_(idImport, options) {
   importBancaire.getRange(ligneImport, 11).setValue('Classée');
   importBancaire.getRange(ligneImport, 13).setValue(nouvelleNote);
 
+  // Retirer la validation de P:S sur cette ligne (protection contre la validation héritée de O)
+  importBancaire.getRange(ligneImport, 16, 1, 4).clearDataValidations();
+
   // P:Q toujours écrits avec le fournisseur confirmé (obligatoire)
   importBancaire.getRange(ligneImport, 16).setNumberFormat('@').setValue(idFournisseur);
   importBancaire.getRange(ligneImport, 17).setValue(nomFournisseur);

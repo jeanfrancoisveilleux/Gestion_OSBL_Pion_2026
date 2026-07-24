@@ -284,6 +284,7 @@ function appliquerReglesBancairesImport_(feuille, ligneDepart, nombreLignes, cla
 
       const ligneSheet = ligneDepart + i;
 
+      feuille.getRange(ligneSheet, 16, 1, 4).clearDataValidations();
       if (regle.idFournisseur) {
         feuille.getRange(ligneSheet, 16).setNumberFormat('@').setValue(regle.idFournisseur);
         feuille.getRange(ligneSheet, 17).setValue(regle.nomFournisseur || '');

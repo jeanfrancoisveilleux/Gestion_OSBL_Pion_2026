@@ -11,13 +11,18 @@ function installerGestionFournisseursContacts() {
   installerColonnesFournisseurJournal_(ss);
   installerColonnesFournisseurImportBancaire_(ss);
 
+  const lignesReparees = repairerSyncFournisseurImportClassee_(ss);
+
   SpreadsheetApp.getUi().alert(
     'Gestion des fournisseurs et contacts installée avec succès.\n\n' +
     'Onglets créés : Fournisseurs, Contacts.\n' +
     'Comptes ajoutés : 4080, 6065 (si absents).\n' +
     'Règles bancaires configurées dans Configuration!T:Z.\n' +
-    'Colonnes fournisseur ajoutées dans Transactions (R:S), Journal (O:P) ' +
-    'et Import bancaire (P:S).'
+    'Colonnes fournisseur ajoutées dans Transactions (R:T), Journal (O:P) ' +
+    'et Import bancaire (P:S).\n' +
+    (lignesReparees > 0
+      ? lignesReparees + ' ligne(s) de l\'import bancaire réparée(s) avec le fournisseur confirmé.'
+      : 'Aucune ligne à réparer dans l\'import bancaire.')
   );
 }
 
@@ -389,6 +394,96 @@ function installerColonnesFournisseurImportBancaire_(ss) {
       );
     }
   });
+
+  // Retirer les validations héritées de O dans P6:S (idempotent, ne touche pas aux valeurs)
+  const derniereLigne = feuille.getMaxRows();
+  if (derniereLigne >= 6) {
+    feuille.getRange(6, 16, derniereLigne - 5, 4).clearDataValidations();
+  }
+}
+
+// ─── Réparation des imports classés ──────────────────────────────────────────
+
+function repairerSyncFournisseurImportClassee_(ss) {
+  const importBancaire = ss.getSheetByName('Import bancaire');
+  const transactions = ss.getSheetByName('Transactions');
+
+  if (!importBancaire || !transactions) return 0;
+
+  const derniereLigneImport = importBancaire.getLastRow();
+  const derniereLigneTransactions = transactions.getLastRow();
+
+  if (derniereLigneImport < 6 || derniereLigneTransactions < 6) return 0;
+
+  // Index : referenceImport → infos fournisseur/contact (première transaction active trouvée)
+  const indexFournisseurs = {};
+
+  transactions
+    .getRange(6, 1, derniereLigneTransactions - 5, 20)
+    .getValues()
+    .forEach(function(ligne) {
+      const referenceImport = String(ligne[13] || '').trim(); // col N
+      const statut = String(ligne[14] || '').trim();          // col O
+      const idFournisseur = String(ligne[17] || '').trim();   // col R
+      const nomFournisseur = String(ligne[18] || '').trim();  // col S
+      const idContact = String(ligne[19] || '').trim();       // col T
+      const nomContact = String(ligne[3] || '').trim();       // col D
+
+      if (!referenceImport) return;
+      if (statut === 'Annulée' || statut === 'Exemple') return;
+      if (!idFournisseur) return;
+      if (indexFournisseurs[referenceImport]) return; // premier actif suffit
+
+      indexFournisseurs[referenceImport] = {
+        idFournisseur: idFournisseur,
+        nomFournisseur: nomFournisseur,
+        idContact: idContact,
+        nomContact: nomContact
+      };
+    });
+
+  const valeursImport = importBancaire
+    .getRange(6, 1, derniereLigneImport - 5, 19)
+    .getValues();
+
+  let compteur = 0;
+
+  valeursImport.forEach(function(ligne, index) {
+    const referenceImport = String(ligne[0] || '').trim();  // col A
+    const statut = String(ligne[10] || '').trim();          // col K
+    const pActuel = String(ligne[15] || '').trim();         // col P
+    const rActuel = String(ligne[17] || '').trim();         // col R
+
+    if (statut !== 'Classée') return;
+    if (!referenceImport) return;
+
+    const infos = indexFournisseurs[referenceImport];
+    if (!infos) return;
+
+    // Déjà synchronisé (fournisseur ET contact corrects)
+    if (pActuel === infos.idFournisseur && rActuel === infos.idContact) return;
+
+    const ligneSheet = index + 6;
+
+    // Retirer la validation de P:S sur cette ligne uniquement (jamais O)
+    importBancaire.getRange(ligneSheet, 16, 1, 4).clearDataValidations();
+
+    // P:Q = fournisseur confirmé
+    importBancaire.getRange(ligneSheet, 16).setNumberFormat('@').setValue(infos.idFournisseur);
+    importBancaire.getRange(ligneSheet, 17).setValue(infos.nomFournisseur);
+
+    // R:S = contact si présent, sinon vider
+    if (infos.idContact) {
+      importBancaire.getRange(ligneSheet, 18).setNumberFormat('@').setValue(infos.idContact);
+      importBancaire.getRange(ligneSheet, 19).setValue(infos.nomContact);
+    } else {
+      importBancaire.getRange(ligneSheet, 18, 1, 2).clearContent();
+    }
+
+    compteur += 1;
+  });
+
+  return compteur;
 }
 
 // ─── Accès aux données (utilisé par FinalisationMixtes.js et ImportCsv.js) ───
