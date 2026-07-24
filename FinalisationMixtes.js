@@ -3070,6 +3070,29 @@ function preparerContexteDepenseMixte_(donnees, options) {
   };
 }
 
+function nettoyerLignesIncompletesRepartitionMixte_(feuille, idImport) {
+  const lignes = lireLignesRepartitionMixte_(feuille, idImport);
+  let nombreNettoyees = 0;
+
+  lignes.forEach(function(ligne) {
+    const colonneF = String(ligne.valeurs[5] || '').trim();
+    const colonneJ = String(ligne.valeurs[9] || '').trim();
+    const colonneO = String(ligne.valeurs[14] || '').trim();
+    const colonneQ = String(ligne.valeurs[16] || '').trim();
+
+    if (
+      colonneF === '' &&
+      colonneJ === '' &&
+      colonneQ.indexOf('Annulée') !== 0
+    ) {
+      feuille.getRange(ligne.numero, 1, 1, 17).clearContent();
+      nombreNettoyees += 1;
+    }
+  });
+
+  return nombreNettoyees;
+}
+
 function enregistrerRepartitionDepenseMixte_(feuille, valeursImport, lignes, options) {
   const optionsRepartition = options || {};
   const conserverHistorique = Boolean(optionsRepartition.conserverHistorique);
@@ -3088,6 +3111,11 @@ function enregistrerRepartitionDepenseMixte_(feuille, valeursImport, lignes, opt
     SpreadsheetApp.flush();
   }
 
+  const nombreNettoyees = nettoyerLignesIncompletesRepartitionMixte_(feuille, idImport);
+  if (nombreNettoyees > 0) {
+    SpreadsheetApp.flush();
+  }
+
   const debut = trouverBlocVideRepartitionMixte_(feuille, lignes.length);
   const derniereLigneRepartition = feuille.getMaxRows();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -3095,46 +3123,65 @@ function enregistrerRepartitionDepenseMixte_(feuille, valeursImport, lignes, opt
     obtenirFeuilleMixte_(ss, 'Configuration')
   );
 
-  for (let index = 0; index < lignes.length; index += 1) {
-    const numero = debut + index;
-    const ligne = lignes[index];
-    const entreeCompte = planComptable[ligne.compte] || {};
-    const nomCompte = entreeCompte.nom || ligne.compte;
+  const lignesUtilisees = [];
+  const validationsOriginales = {};
 
-    feuille.getRange(numero, 1, 1, 5).setValues([[
-      idImport,
-      valeursImport[1],
-      valeursImport[2],
-      montantAbsolu,
-      index + 1
-    ]]);
+  try {
+    for (let index = 0; index < lignes.length; index += 1) {
+      const numero = debut + index;
+      const ligne = lignes[index];
+      const entreeCompte = planComptable[ligne.compte] || {};
+      const nomCompte = entreeCompte.nom || ligne.compte;
 
-    feuille.getRange(numero, 6).setNumberFormat('@').setValue(String(ligne.compte));
+      feuille.getRange(numero, 1, 1, 5).setValues([[
+        idImport,
+        valeursImport[1],
+        valeursImport[2],
+        montantAbsolu,
+        index + 1
+      ]]);
 
-    feuille.getRange(numero, 7, 1, 2).setValues([[1, arrondirMontantMixte_(ligne.montant)]]);
+      lignesUtilisees.push(numero);
 
-    feuille.getRange(numero, 9).setFormula(
-      '=IF(OR($A' + numero + '="",$F' + numero + '=""),"",$G' + numero + '*$H' + numero + ')'
-    );
+      const celluleF = feuille.getRange(numero, 6);
+      validationsOriginales[numero] = celluleF.getDataValidation();
+      celluleF.clearDataValidations();
+      celluleF.setNumberFormat('@').setValue(String(ligne.compte));
 
-    feuille.getRange(numero, 10).setValue(nomCompte);
-    feuille.getRange(numero, 11).setValue(ligne.programme || '');
-    feuille.getRange(numero, 12).setValue(ligne.projet || '');
+      feuille.getRange(numero, 7, 1, 2).setValues([[1, arrondirMontantMixte_(ligne.montant)]]);
 
-    feuille.getRange(numero, 13).setFormula(
-      '=IF($A' + numero + '="","",SUMIFS($I$6:$I$' +
-      derniereLigneRepartition + ',$A$6:$A$' + derniereLigneRepartition +
-      ',$A' + numero + ',$Q$6:$Q$' + derniereLigneRepartition + ',"<>Annulée*"))'
-    );
-    feuille.getRange(numero, 14).setFormula(
-      '=IF($A' + numero + '="","",$D' + numero + '-$M' + numero + ')'
-    );
-    feuille.getRange(numero, 15).setFormula(
-      '=IF($A' + numero + '="","",IF(ABS($N' + numero +
-      ')<0.005,"Prêt",IF($N' + numero + '<0,"Dépassement","À compléter")))'
-    );
+      feuille.getRange(numero, 9).setFormula(
+        '=IF(OR($A' + numero + '="",$F' + numero + '=""),"",$G' + numero + '*$H' + numero + ')'
+      );
 
-    feuille.getRange(numero, 17).setValue(conserverHistorique ? noteRevision : '');
+      feuille.getRange(numero, 10).setValue(nomCompte);
+      feuille.getRange(numero, 11).setValue(ligne.programme || '');
+      feuille.getRange(numero, 12).setValue(ligne.projet || '');
+
+      feuille.getRange(numero, 13).setFormula(
+        '=IF($A' + numero + '="","",SUMIFS($I$6:$I$' +
+        derniereLigneRepartition + ',$A$6:$A$' + derniereLigneRepartition +
+        ',$A' + numero + ',$Q$6:$Q$' + derniereLigneRepartition + ',"<>Annulée*"))'
+      );
+      feuille.getRange(numero, 14).setFormula(
+        '=IF($A' + numero + '="","",$D' + numero + '-$M' + numero + ')'
+      );
+      feuille.getRange(numero, 15).setFormula(
+        '=IF($A' + numero + '="","",IF(ABS($N' + numero +
+        ')<0.005,"Prêt",IF($N' + numero + '<0,"Dépassement","À compléter")))'
+      );
+
+      feuille.getRange(numero, 17).setValue(conserverHistorique ? noteRevision : '');
+    }
+  } catch (erreur) {
+    lignesUtilisees.forEach(function(numero) {
+      feuille.getRange(numero, 1, 1, 17).clearContent();
+      const validationOriginale = validationsOriginales[numero];
+      if (validationOriginale) {
+        feuille.getRange(numero, 6).setDataValidation(validationOriginale);
+      }
+    });
+    throw erreur;
   }
 
   importBancaireModeMixte_(valeursImport[0]);
