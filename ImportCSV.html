@@ -56,6 +56,7 @@
 
     #fermer {
       display: none;
+      width: 100%;
       margin-top: 12px;
       color: #1a73e8;
       background: #e8f0fe;
@@ -66,13 +67,55 @@
       cursor: wait;
     }
 
+    .progression {
+      display: none;
+      margin-top: 16px;
+      padding: 16px;
+      border-radius: 8px;
+      color: #174ea6;
+      background: #e8f0fe;
+    }
+
+    .progression-visible {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .spinner {
+      width: 22px;
+      height: 22px;
+      flex: 0 0 22px;
+      border: 3px solid #aecbfa;
+      border-top-color: #1a73e8;
+      border-radius: 50%;
+      animation: rotation 0.8s linear infinite;
+    }
+
+    .progression-titre {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .progression-detail {
+      margin-top: 3px;
+      color: #3c4043;
+      font-size: 12px;
+    }
+
+    @keyframes rotation {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
     .message {
       display: none;
       margin-top: 16px;
-      padding: 13px;
-      border-radius: 6px;
+      padding: 16px;
+      border-radius: 8px;
       font-size: 13px;
-      line-height: 1.5;
+      line-height: 1.55;
     }
 
     .succes {
@@ -110,7 +153,7 @@
     ne sera créée à cette étape.
   </div>
 
-  <div class="zone">
+  <div id="zoneImport" class="zone">
     <input
       id="fichier"
       type="file"
@@ -122,22 +165,52 @@
     </button>
   </div>
 
-  <div id="message" class="message"></div>
+  <div
+    id="progression"
+    class="progression"
+    role="status"
+    aria-live="polite"
+  >
+    <div class="spinner" aria-hidden="true"></div>
+    <div>
+      <div class="progression-titre">
+        Importation en cours…
+      </div>
+      <div id="progressionDetail" class="progression-detail">
+        Lecture et analyse du relevé bancaire.
+      </div>
+    </div>
+  </div>
+
+  <div
+    id="message"
+    class="message"
+    role="status"
+    aria-live="assertive"
+  ></div>
 
   <button id="fermer" type="button">
     Fermer
   </button>
 
-  <div class="confidentiel">
+  <div id="confidentiel" class="confidentiel">
     Utilisez le format « CSV accentué » de Desjardins.
     Les doublons déjà présents seront ignorés.
   </div>
 
   <script>
+    const zoneImport = document.getElementById('zoneImport');
     const fichier = document.getElementById('fichier');
     const importer = document.getElementById('importer');
     const fermer = document.getElementById('fermer');
+    const progression = document.getElementById('progression');
+    const progressionDetail =
+      document.getElementById('progressionDetail');
     const message = document.getElementById('message');
+    const confidentiel = document.getElementById('confidentiel');
+
+    let minuterie = null;
+    let debutImportation = null;
 
     importer.addEventListener('click', function() {
       if (!fichier.files.length) {
@@ -152,14 +225,14 @@
         return;
       }
 
-      importer.disabled = true;
-      importer.textContent = 'Importation en cours…';
-      message.className = 'message';
-      message.textContent = '';
+      demarrerProgression();
 
       const lecteur = new FileReader();
 
       lecteur.onload = function(evenement) {
+        progressionDetail.textContent =
+          'Envoi du fichier et ajout des transactions…';
+
         google.script.run
           .withSuccessHandler(importationTerminee)
           .withFailureHandler(function(erreur) {
@@ -188,7 +261,43 @@
       google.script.host.close();
     });
 
+    function demarrerProgression() {
+      arreterMinuterie();
+
+      debutImportation = Date.now();
+      fichier.disabled = true;
+      importer.disabled = true;
+      importer.textContent = 'Importation en cours…';
+
+      message.className = 'message';
+      message.textContent = '';
+      fermer.style.display = 'none';
+
+      progression.className =
+        'progression progression-visible';
+      progressionDetail.textContent =
+        'Lecture et analyse du relevé bancaire…';
+
+      minuterie = setInterval(function() {
+        const secondes = Math.max(
+          0,
+          Math.floor((Date.now() - debutImportation) / 1000)
+        );
+
+        progressionDetail.textContent =
+          'Traitement en cours — ' +
+          secondes +
+          ' seconde' +
+          (secondes > 1 ? 's' : '') +
+          ' écoulée' +
+          (secondes > 1 ? 's' : '') +
+          '.';
+      }, 1000);
+    }
+
     function importationTerminee(resultat) {
+      arreterMinuterie();
+
       const argent = new Intl.NumberFormat('fr-CA', {
         style: 'currency',
         currency: 'CAD'
@@ -214,7 +323,9 @@
 
         if (Math.abs(resultat.ecartOuverture) < 0.01) {
           contenu +=
-            '<br><strong>Le solde initial correspond au classeur.</strong>';
+            '<br><strong>' +
+            'Le solde initial correspond au classeur.' +
+            '</strong>';
         } else {
           contenu +=
             '<br><span class="avertissement">' +
@@ -226,19 +337,45 @@
         contenu += '<br><br>' + resultat.message;
       }
 
+      zoneImport.style.display = 'none';
+      progression.className = 'progression';
+      confidentiel.style.display = 'none';
+
       message.className = 'message succes';
       message.innerHTML = contenu;
 
       importer.style.display = 'none';
-      fermer.style.display = 'inline-block';
+      fermer.style.display = 'block';
+
+      message.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      });
     }
 
     function afficherErreur(texte) {
-      message.className = 'message erreur';
-      message.textContent = texte;
+      arreterMinuterie();
 
+      progression.className = 'progression';
+      fichier.disabled = false;
       importer.disabled = false;
       importer.textContent = 'Analyser et importer';
+
+      message.className = 'message erreur';
+      message.textContent = texte;
+      fermer.style.display = 'block';
+
+      message.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      });
+    }
+
+    function arreterMinuterie() {
+      if (minuterie !== null) {
+        clearInterval(minuterie);
+        minuterie = null;
+      }
     }
   </script>
 </body>
