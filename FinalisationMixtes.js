@@ -957,49 +957,120 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
     };
   }
 
-  const optionsComposantes = construireOptionsComposantesMixtes_(
-    ss,
-    valeurs[1]
-  );
+  const optionsComposantes = construireOptionsComposantesMixtes_(ss, valeurs[1]);
+  const donneesRevenusDirects = chargerComptesRevenusDirectsMixte_(ss);
 
-  const lignesExistantes = lireLignesActivesRepartitionMixte_(
+  const lignesRepartitionExistantes = lireLignesActivesRepartitionMixte_(
     repartition,
     idImport
-  )
-    .filter(function(ligne) {
-      return String(ligne.valeurs[5] || '').trim() !== '';
-    })
-    .map(function(ligne) {
-      return {
-        composante: String(ligne.valeurs[5] || '').trim(),
-        quantite: Number(ligne.valeurs[6] || 1),
-        prixUnitaire: Number(ligne.valeurs[7] || 0)
-      };
-    });
+  ).filter(function(ligne) {
+    return String(ligne.valeurs[5] || '').trim() !== '';
+  });
 
-  return {
-    typeMouvement: 'revenu',
+  // Détecter le mode à partir des lignes actives de Répartition (col P = index 15)
+  let modeRevenuDetecte = 'revenu';
+  let regleBancaireCourant = null;
+
+  if (lignesRepartitionExistantes.length > 0) {
+    const marqueur = String(lignesRepartitionExistantes[0].valeurs[15] || '').trim();
+    if (marqueur === 'Revenu comptable direct') {
+      modeRevenuDetecte = 'revenu_direct';
+    }
+  } else if (!modeRevision) {
+    regleBancaireCourant = rechercherRegleBancaire_(
+      ss,
+      String(valeurs[2] || '').trim(),
+      montant
+    );
+    if (regleBancaireCourant && regleBancaireCourant.codeCompte) {
+      const compteTrouve = donneesRevenusDirects.comptes.find(function(c) {
+        return c.code === regleBancaireCourant.codeCompte;
+      });
+      if (compteTrouve) {
+        modeRevenuDetecte = 'revenu_direct';
+      }
+    }
+  }
+
+  const dateFormatee = Utilities.formatDate(
+    valeurs[1],
+    ss.getSpreadsheetTimeZone(),
+    'yyyy-MM-dd'
+  );
+  const descriptionBancaireMixte = String(valeurs[2] || '').trim();
+  const titreBase = {
     mode: modeRevision ? 'revision' : 'creation',
-    titre: modeRevision
-      ? 'Modifier la répartition'
-      : 'Répartir la transaction',
+    titre: modeRevision ? 'Modifier la répartition' : 'Répartir la transaction',
     boutonPrincipal: modeRevision
       ? 'Enregistrer la révision'
       : 'Enregistrer et comptabiliser',
     idTransactionSource: idTransactionSource,
     idImport: idImport,
-    date: Utilities.formatDate(
-      valeurs[1],
-      ss.getSpreadsheetTimeZone(),
-      'yyyy-MM-dd'
-    ),
-    description: String(valeurs[2] || '').trim(),
-    montant: montantArrondi,
+    date: dateFormatee,
+    description: descriptionBancaireMixte,
+    montant: montantArrondi
+  };
+
+  if (modeRevenuDetecte === 'revenu_direct') {
+    const lignesDirectesExistantes = lignesRepartitionExistantes.map(
+      function(ligne) {
+        return {
+          compte: String(ligne.valeurs[5] || '').trim(),
+          programme: String(ligne.valeurs[10] || '').trim(),
+          projet: String(ligne.valeurs[11] || '').trim(),
+          montant: Number(ligne.valeurs[7] || 0)
+        };
+      }
+    );
+
+    let lignesDirectesDefaut;
+    if (lignesDirectesExistantes.length > 0) {
+      lignesDirectesDefaut = lignesDirectesExistantes;
+    } else {
+      const comptePreRempli = (regleBancaireCourant && regleBancaireCourant.codeCompte)
+        ? regleBancaireCourant.codeCompte
+        : '';
+      const programmePreRempli = (regleBancaireCourant && regleBancaireCourant.programme)
+        ? regleBancaireCourant.programme
+        : '';
+      lignesDirectesDefaut = [{
+        compte: comptePreRempli,
+        programme: programmePreRempli,
+        projet: '',
+        montant: montantArrondi
+      }];
+    }
+
+    return Object.assign({}, titreBase, {
+      typeMouvement: 'revenu_direct',
+      comptes: donneesRevenusDirects.comptes,
+      comptesRevenusDirects: donneesRevenusDirects.comptes,
+      programmes: donneesRevenusDirects.programmes,
+      projets: donneesRevenusDirects.projets,
+      options: optionsComposantes,
+      lignes: lignesDirectesDefaut
+    });
+  }
+
+  const lignesExistantes = lignesRepartitionExistantes.map(function(ligne) {
+    return {
+      composante: String(ligne.valeurs[5] || '').trim(),
+      quantite: Number(ligne.valeurs[6] || 1),
+      prixUnitaire: Number(ligne.valeurs[7] || 0)
+    };
+  });
+
+  return Object.assign({}, titreBase, {
+    typeMouvement: 'revenu',
+    comptes: donneesRevenusDirects.comptes,
+    comptesRevenusDirects: donneesRevenusDirects.comptes,
+    programmes: donneesRevenusDirects.programmes,
+    projets: donneesRevenusDirects.projets,
     options: optionsComposantes,
     lignes: lignesExistantes.length
       ? lignesExistantes
       : [{ composante: '', quantite: 1, prixUnitaire: 0 }]
-  };
+  });
 }
 
 function construireOptionsComposantesMixtes_(ss, dateTransaction) {
@@ -2533,6 +2604,29 @@ function nettoyerTraitementPartielMixte_(
   }
 }
 
+function nettoyerLignesRevenuDirectOrphelines_(repartition, idImport) {
+  let modifie = false;
+
+  lireLignesActivesRepartitionMixte_(repartition, idImport).forEach(
+    function(ligne) {
+      const marqueur = String(ligne.valeurs[15] || '').trim();
+      const sync     = String(ligne.valeurs[16] || '').trim();
+
+      if (
+        marqueur === 'Revenu comptable direct' &&
+        sync.indexOf('Annulée') !== 0
+      ) {
+        repartition.getRange(ligne.numero, 1, 1, 17).clearContent();
+        modifie = true;
+      }
+    }
+  );
+
+  if (modifie) {
+    SpreadsheetApp.flush();
+  }
+}
+
 function transactionBancaireDejaPresenteMixte_(
   feuilleTransactions,
   idImport
@@ -3624,5 +3718,902 @@ function ecrirePaireJournalDepenseMixte_(
     '1000', 0, montant,
     programme, projet, description,
     idFournisseur, nomFournisseur
+  );
+}
+
+// ─── Revenus comptables directs ───────────────────────────────────────────────
+
+function chargerComptesRevenusDirectsMixte_(ss) {
+  const configuration = obtenirFeuilleMixte_(ss, 'Configuration');
+  const projets = ss.getSheetByName('Projets');
+  const derniereLigne = configuration.getLastRow();
+  const exclus = ['4000', '4010', '4020'];
+  const comptes = [];
+
+  if (derniereLigne >= 6) {
+    configuration
+      .getRange(6, 1, derniereLigne - 5, 5)
+      .getValues()
+      .forEach(function(ligne) {
+        const code = String(ligne[0] || '').trim();
+        const actif = String(ligne[4] || '').trim();
+        const type = String(ligne[2] || '').trim();
+
+        if (
+          code &&
+          actif === 'Oui' &&
+          type === 'Revenu' &&
+          exclus.indexOf(code) === -1
+        ) {
+          comptes.push({
+            code: code,
+            nom: String(ligne[1] || '').trim(),
+            type: type
+          });
+        }
+      });
+  }
+
+  const programmes = configuration
+    .getRange('I6:I14')
+    .getValues()
+    .flat()
+    .filter(String);
+
+  const listeProjets = [];
+
+  if (projets) {
+    const derniereLigneP = Math.max(projets.getLastRow(), 5);
+
+    if (derniereLigneP >= 6) {
+      projets
+        .getRange(6, 1, derniereLigneP - 5, 4)
+        .getValues()
+        .forEach(function(ligne) {
+          if (ligne[0] && String(ligne[3] || '') !== 'Exemple') {
+            listeProjets.push({
+              id: String(ligne[0]),
+              nom: String(ligne[1] || ''),
+              statut: String(ligne[3] || '')
+            });
+          }
+        });
+    }
+  }
+
+  return {
+    comptes: comptes,
+    programmes: programmes,
+    projets: listeProjets
+  };
+}
+
+function chargerComptesActifsRevenuDirect_(configuration) {
+  const derniereLigne = configuration.getLastRow();
+  const comptesActifs = {};
+  const exclus = ['4000', '4010', '4020'];
+
+  if (derniereLigne >= 6) {
+    configuration
+      .getRange(6, 1, derniereLigne - 5, 5)
+      .getValues()
+      .forEach(function(ligne) {
+        const code = String(ligne[0] || '').trim();
+        const actif = String(ligne[4] || '').trim();
+        const type = String(ligne[2] || '').trim();
+
+        if (
+          code &&
+          actif === 'Oui' &&
+          type === 'Revenu' &&
+          exclus.indexOf(code) === -1
+        ) {
+          comptesActifs[code] = true;
+        }
+      });
+  }
+
+  return comptesActifs;
+}
+
+function enregistrerEtComptabiliserRevenuDirectMixte(donnees) {
+  const verrou = LockService.getDocumentLock();
+
+  if (!verrou.tryLock(30000)) {
+    throw new Error(
+      'Une autre opération est en cours. Attendez quelques secondes et réessayez.'
+    );
+  }
+
+  let contexte = null;
+  let repartitionEcrite = false;
+
+  try {
+    contexte = preparerContexteRevenuDirectMixte_(donnees, {
+      modeRevision: false
+    });
+
+    enregistrerRepartitionRevenuDirectMixte_(
+      contexte.repartition,
+      contexte.valeursImport,
+      contexte.lignes,
+      { conserverHistorique: false }
+    );
+    repartitionEcrite = true;
+
+    const resultat = finaliserRevenuDirectMixteParId_(contexte.idImport, {
+      idGroupeForce: contexte.idGroupeCible
+    });
+
+    return {
+      succes: true,
+      idGroupe: resultat.idGroupe,
+      message: 'Revenu enregistré et comptabilisé sous ' + resultat.idGroupe + '.'
+    };
+
+  } catch (erreur) {
+    if (repartitionEcrite && contexte) {
+      const ss           = SpreadsheetApp.getActiveSpreadsheet();
+      const horodatage   = Utilities.formatDate(
+        new Date(), ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd HH:mm'
+      );
+      const erreursSecondaires = [];
+
+      try {
+        nettoyerLignesRevenuDirectOrphelines_(
+          contexte.repartition,
+          contexte.idImport
+        );
+      } catch (e) {
+        erreursSecondaires.push('Répartition : ' + e.message);
+        console.error('Rollback Répartition :', e.message);
+      }
+
+      try {
+        const transactions = obtenirFeuilleMixte_(ss, 'Transactions');
+        const journal      = obtenirFeuilleMixte_(ss, 'Journal');
+        const forfaits     = ss.getSheetByName('Forfaits');
+        if (forfaits) {
+          nettoyerTraitementPartielMixte_(
+            transactions, journal, forfaits,
+            contexte.idImport, contexte.idGroupeCible
+          );
+        }
+      } catch (e) {
+        erreursSecondaires.push('Transactions/Journal : ' + e.message);
+        console.error('Rollback Transactions/Journal :', e.message);
+      }
+
+      try {
+        const importBancaire = obtenirFeuilleMixte_(ss, 'Import bancaire');
+        remettreImportBancaireAClasser_(importBancaire, contexte.idImport, horodatage);
+      } catch (e) {
+        erreursSecondaires.push('Import bancaire : ' + e.message);
+        console.error('Rollback Import bancaire :', e.message);
+      }
+
+      if (erreursSecondaires.length > 0) {
+        throw new Error(
+          'La comptabilisation a échoué : ' + erreur.message +
+          '. Rollback incomplet : ' + erreursSecondaires.join('; ') +
+          '. Vérifiez Répartition, Transactions, Journal et Import bancaire.'
+        );
+      }
+    }
+    throw erreur;
+
+  } finally {
+    verrou.releaseLock();
+  }
+}
+
+function enregistrerRevisionRevenuDirectMixte(donnees) {
+  const verrou = LockService.getDocumentLock();
+
+  if (!verrou.tryLock(30000)) {
+    throw new Error(
+      'Une autre opération est en cours. Attendez quelques secondes et réessayez.'
+    );
+  }
+
+  let contexte = null;
+  let annulationEffectuee = false;
+  let repartitionEcrite = false;
+
+  try {
+    contexte = preparerContexteRevenuDirectMixte_(donnees, {
+      modeRevision: true
+    });
+    const idRevisionSource = extraireIdGroupeDepuisTransactionMixte_(
+      contexte.idTransactionSource
+    );
+
+    annulerGroupeTransactionsOSBLSansVerrou_(
+      contexte.idTransactionSource,
+      contexte.idImport,
+      { idNouvelleRevision: contexte.idGroupeCible }
+    );
+    annulationEffectuee = true;
+
+    enregistrerRepartitionRevenuDirectMixte_(
+      contexte.repartition,
+      contexte.valeursImport,
+      contexte.lignes,
+      {
+        conserverHistorique: true,
+        noteRevision:
+          'Révision active – de ' +
+          idRevisionSource +
+          ' vers ' +
+          contexte.idGroupeCible
+      }
+    );
+    repartitionEcrite = true;
+
+    const resultat = finaliserRevenuDirectMixteParId_(contexte.idImport, {
+      idGroupeForce: contexte.idGroupeCible,
+      idRevisionSource: idRevisionSource
+    });
+
+    return {
+      succes: true,
+      idGroupe: resultat.idGroupe,
+      message: 'Révision enregistrée et comptabilisée sous ' + resultat.idGroupe + '.'
+    };
+
+  } catch (erreur) {
+    if (annulationEffectuee && contexte) {
+      const ss           = SpreadsheetApp.getActiveSpreadsheet();
+      const horodatage   = Utilities.formatDate(
+        new Date(), ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd HH:mm'
+      );
+      const erreursSecondaires = [];
+
+      if (repartitionEcrite) {
+        try {
+          nettoyerLignesRevenuDirectOrphelines_(
+            contexte.repartition,
+            contexte.idImport
+          );
+        } catch (e) {
+          erreursSecondaires.push('Répartition : ' + e.message);
+          console.error('Rollback Répartition :', e.message);
+        }
+
+        try {
+          const transactions = obtenirFeuilleMixte_(ss, 'Transactions');
+          const journal      = obtenirFeuilleMixte_(ss, 'Journal');
+          const forfaits     = ss.getSheetByName('Forfaits');
+          if (forfaits) {
+            nettoyerTraitementPartielMixte_(
+              transactions, journal, forfaits,
+              contexte.idImport, contexte.idGroupeCible
+            );
+          }
+        } catch (e) {
+          erreursSecondaires.push('Transactions/Journal : ' + e.message);
+          console.error('Rollback Transactions/Journal :', e.message);
+        }
+      }
+
+      try {
+        const importBancaire = obtenirFeuilleMixte_(ss, 'Import bancaire');
+        remettreImportBancaireAClasser_(importBancaire, contexte.idImport, horodatage);
+      } catch (e) {
+        erreursSecondaires.push('Import bancaire : ' + e.message);
+        console.error('Rollback Import bancaire :', e.message);
+      }
+
+      const messageOriginal =
+        erreur && erreur.message ? erreur.message : String(erreur);
+
+      const messageSuffix = erreursSecondaires.length > 0
+        ? ' Rollback incomplet : ' + erreursSecondaires.join('; ') +
+          '. Vérifiez Répartition, Transactions, Journal et Import bancaire.'
+        : ' La transaction bancaire a été remise à « À classer ».';
+
+      throw new Error(
+        'L\'ancienne version a été annulée, mais la nouvelle révision n\'a pas pu être créée.' +
+        messageSuffix + ' Détail : ' + messageOriginal
+      );
+    }
+
+    throw erreur;
+
+  } finally {
+    verrou.releaseLock();
+  }
+}
+
+function preparerContexteRevenuDirectMixte_(donnees, options) {
+  const optionsTraitement = options || {};
+  const modeRevision = Boolean(optionsTraitement.modeRevision);
+  const exclus = ['4000', '4010', '4020'];
+
+  if (!donnees || !donnees.idImport || !Array.isArray(donnees.lignes)) {
+    throw new Error('Les données reçues sont incomplètes.');
+  }
+
+  const lignes = donnees.lignes
+    .map(function(ligne) {
+      return {
+        compte: String(ligne.compte || '').trim(),
+        programme: String(ligne.programme || '').trim(),
+        projet: String(ligne.projet || '').trim(),
+        montant: arrondirMontantMixte_(Number(ligne.montant || 0))
+      };
+    })
+    .filter(function(ligne) {
+      return ligne.compte !== '';
+    });
+
+  if (lignes.length === 0 || lignes.length > 5) {
+    throw new Error(
+      'La transaction doit contenir entre une et cinq lignes de revenu.'
+    );
+  }
+
+  lignes.forEach(function(ligne, index) {
+    if (!ligne.compte) {
+      throw new Error(
+        'Le compte de la ligne ' + (index + 1) + ' est obligatoire.'
+      );
+    }
+
+    if (Number(ligne.montant) <= 0) {
+      throw new Error(
+        'Le montant de la ligne ' + (index + 1) + ' doit être supérieur à zéro.'
+      );
+    }
+
+    if (exclus.indexOf(ligne.compte) !== -1) {
+      throw new Error(
+        'Le compte ' +
+        ligne.compte +
+        ' est réservé au mode spécialisé (entrées, forfaits, marchandises).'
+      );
+    }
+  });
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const importBancaire = obtenirFeuilleMixte_(ss, 'Import bancaire');
+  const repartition = obtenirFeuilleMixte_(ss, 'Répartition');
+  const transactions = obtenirFeuilleMixte_(ss, 'Transactions');
+  const journal = obtenirFeuilleMixte_(ss, 'Journal');
+  const configuration = obtenirFeuilleMixte_(ss, 'Configuration');
+
+  const idImport = String(donnees.idImport || '').trim();
+  const idTransactionSource = String(donnees.idTransactionSource || '').trim();
+
+  const ligneImport = trouverLigneParValeurMixte_(
+    importBancaire, 1, idImport, 6
+  );
+
+  if (!ligneImport) {
+    throw new Error('La transaction bancaire est introuvable.');
+  }
+
+  const valeursImport = importBancaire
+    .getRange(ligneImport, 1, 1, 15)
+    .getValues()[0];
+  const montantBancaire = arrondirMontantMixte_(Number(valeursImport[3] || 0));
+
+  if (montantBancaire <= 0) {
+    throw new Error(
+      'Cette fonction traite uniquement les revenus ' +
+      '(montant positif dans Import bancaire).'
+    );
+  }
+
+  const totalSaisi = arrondirMontantMixte_(
+    lignes.reduce(function(total, ligne) {
+      return total + ligne.montant;
+    }, 0)
+  );
+
+  if (Math.abs(montantBancaire - totalSaisi) >= 0.005) {
+    throw new Error(
+      'Le total saisi (' +
+      totalSaisi.toFixed(2) +
+      ' $) doit correspondre au montant bancaire (' +
+      montantBancaire.toFixed(2) +
+      ' $).'
+    );
+  }
+
+  const planComptable = chargerPlanComptableMixte_(configuration);
+
+  if (!planComptable['1000']) {
+    throw new Error(
+      'Le compte bancaire 1000 est introuvable dans le plan comptable.'
+    );
+  }
+
+  const comptesActifsRevenu = chargerComptesActifsRevenuDirect_(configuration);
+
+  const programmesAutorises = configuration
+    .getRange('I6:I14')
+    .getValues()
+    .flat()
+    .filter(function(v) {
+      return String(v || '').trim() !== '';
+    })
+    .map(function(v) {
+      return String(v).trim();
+    });
+
+  const projetsSheet = ss.getSheetByName('Projets');
+  const projetsAutorises = [];
+
+  if (projetsSheet) {
+    const derniereLigneP = Math.max(projetsSheet.getLastRow(), 5);
+
+    if (derniereLigneP >= 6) {
+      projetsSheet
+        .getRange(6, 1, derniereLigneP - 5, 4)
+        .getValues()
+        .forEach(function(ligneProj) {
+          if (ligneProj[0] && String(ligneProj[3] || '') !== 'Exemple') {
+            projetsAutorises.push(String(ligneProj[0]).trim());
+          }
+        });
+    }
+  }
+
+  lignes.forEach(function(ligne, index) {
+    if (!planComptable[ligne.compte]) {
+      throw new Error(
+        'Le compte ' +
+        ligne.compte +
+        ' est absent du plan comptable (ligne ' +
+        (index + 1) +
+        ').'
+      );
+    }
+
+    if (!comptesActifsRevenu[ligne.compte]) {
+      throw new Error(
+        'Le compte ' +
+        ligne.compte +
+        ' n\'est pas un compte de revenu direct actif (ligne ' +
+        (index + 1) +
+        ').'
+      );
+    }
+
+    if (ligne.programme && programmesAutorises.indexOf(ligne.programme) === -1) {
+      throw new Error(
+        'Le programme "' +
+        ligne.programme +
+        '" n\'est pas autorisé (ligne ' +
+        (index + 1) +
+        ').'
+      );
+    }
+
+    if (ligne.projet && projetsAutorises.indexOf(ligne.projet) === -1) {
+      throw new Error(
+        'Le projet "' +
+        ligne.projet +
+        '" n\'est pas autorisé (ligne ' +
+        (index + 1) +
+        ').'
+      );
+    }
+  });
+
+  if (modeRevision) {
+    if (!idTransactionSource) {
+      throw new Error('La transaction source de la révision est introuvable.');
+    }
+
+    const cibles = obtenirTransactionsCiblesAnnulation_(
+      transactions,
+      idTransactionSource,
+      idImport
+    );
+    const ids = cibles.map(function(cible) {
+      return String(cible.valeurs[0] || '').trim();
+    });
+
+    if (ids.indexOf(idTransactionSource) === -1) {
+      throw new Error(
+        'La transaction active sélectionnée n\'a pas été retrouvée.'
+      );
+    }
+
+    validerEcrituresJournalActivesMixte_(journal, ids);
+
+    const repartitionActive = lireLignesActivesRepartitionMixte_(
+      repartition,
+      idImport
+    );
+
+    if (repartitionActive.length === 0) {
+      throw new Error(
+        'Aucune répartition active n\'a été trouvée pour cette transaction.'
+      );
+    }
+  }
+
+  const idGroupeCible = creerIdGroupeDisponibleMixte_(transactions, idImport);
+  validerAbsenceConflitIdGroupeMixte_(transactions, idGroupeCible);
+
+  return {
+    idImport: idImport,
+    idTransactionSource: idTransactionSource,
+    idGroupeCible: idGroupeCible,
+    valeursImport: valeursImport,
+    lignes: lignes,
+    repartition: repartition
+  };
+}
+
+function enregistrerRepartitionRevenuDirectMixte_(
+  feuille,
+  valeursImport,
+  lignes,
+  options
+) {
+  const optionsRepartition = options || {};
+  const conserverHistorique = Boolean(optionsRepartition.conserverHistorique);
+  const noteRevision = String(optionsRepartition.noteRevision || '').trim();
+  const idImport = String(valeursImport[0] || '').trim();
+  const montant = arrondirMontantMixte_(Number(valeursImport[3] || 0));
+  const lignesActivesExistantes = lireLignesActivesRepartitionMixte_(
+    feuille,
+    idImport
+  );
+
+  if (!conserverHistorique) {
+    lignesActivesExistantes.forEach(function(ligneExistante) {
+      feuille.getRange(ligneExistante.numero, 1, 1, 17).clearContent();
+    });
+  }
+
+  if (!conserverHistorique && lignesActivesExistantes.length) {
+    SpreadsheetApp.flush();
+  }
+
+  const debut = trouverBlocVideRepartitionMixte_(feuille, lignes.length);
+  const derniereLigneRepartition = feuille.getMaxRows();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const planComptable = chargerPlanComptableMixte_(
+    obtenirFeuilleMixte_(ss, 'Configuration')
+  );
+
+  const lignesUtilisees = [];
+  const validationsOriginales = {};
+
+  try {
+    for (let index = 0; index < lignes.length; index += 1) {
+      const numero = debut + index;
+      const ligne = lignes[index];
+      const entreeCompte = planComptable[ligne.compte] || {};
+      const nomCompte = entreeCompte.nom || ligne.compte;
+
+      feuille.getRange(numero, 1, 1, 5).setValues([[
+        idImport,
+        valeursImport[1],
+        valeursImport[2],
+        montant,
+        index + 1
+      ]]);
+
+      lignesUtilisees.push(numero);
+
+      const celluleF = feuille.getRange(numero, 6);
+      validationsOriginales[numero] = celluleF.getDataValidation();
+      celluleF.clearDataValidations();
+      celluleF.setNumberFormat('@').setValue(String(ligne.compte));
+
+      feuille.getRange(numero, 7, 1, 2).setValues([
+        [1, arrondirMontantMixte_(ligne.montant)]
+      ]);
+
+      feuille.getRange(numero, 9).setFormula(
+        '=IF(OR($A' + numero + '="",$F' + numero + '=""),"",$G' +
+        numero + '*$H' + numero + ')'
+      );
+
+      feuille.getRange(numero, 10).setValue(nomCompte);
+      feuille.getRange(numero, 11).setValue(ligne.programme || '');
+      feuille.getRange(numero, 12).setValue(ligne.projet || '');
+
+      feuille.getRange(numero, 13).setFormula(
+        '=IF($A' + numero + '="","",SUMIFS($I$6:$I$' +
+        derniereLigneRepartition + ',$A$6:$A$' + derniereLigneRepartition +
+        ',$A' + numero + ',$Q$6:$Q$' + derniereLigneRepartition +
+        ',"<>Annulée*"))'
+      );
+      feuille.getRange(numero, 14).setFormula(
+        '=IF($A' + numero + '="","",$D' + numero + '-$M' + numero + ')'
+      );
+      feuille.getRange(numero, 15).setFormula(
+        '=IF($A' + numero + '="","",IF(ABS($N' + numero +
+        ')<0.005,"Prêt",IF($N' + numero + '<0,"Dépassement","À compléter")))'
+      );
+
+      feuille.getRange(numero, 16).setValue('Revenu comptable direct');
+      feuille.getRange(numero, 17).setValue(
+        conserverHistorique ? noteRevision : ''
+      );
+    }
+  } catch (erreur) {
+    lignesUtilisees.forEach(function(numero) {
+      feuille.getRange(numero, 1, 1, 17).clearContent();
+      const validationOriginale = validationsOriginales[numero];
+      if (validationOriginale) {
+        feuille.getRange(numero, 6).setDataValidation(validationOriginale);
+      }
+    });
+    throw erreur;
+  }
+
+  importBancaireModeMixte_(valeursImport[0]);
+  SpreadsheetApp.flush();
+}
+
+function finaliserRevenuDirectMixteParId_(idImport, options) {
+  const optionsFinalisation = options || {};
+  const idGroupeForce = String(optionsFinalisation.idGroupeForce || '').trim();
+  const idRevisionSource = String(optionsFinalisation.idRevisionSource || '').trim();
+  const exclus = ['4000', '4010', '4020'];
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const repartition = obtenirFeuilleMixte_(ss, 'Répartition');
+  const importBancaire = obtenirFeuilleMixte_(ss, 'Import bancaire');
+  const transactions = obtenirFeuilleMixte_(ss, 'Transactions');
+  const journal = obtenirFeuilleMixte_(ss, 'Journal');
+  const configuration = obtenirFeuilleMixte_(ss, 'Configuration');
+
+  SpreadsheetApp.flush();
+
+  const ligneImport = trouverLigneParValeurMixte_(
+    importBancaire, 1, idImport, 6
+  );
+
+  if (!ligneImport) {
+    throw new Error(
+      'La transaction ' + idImport + ' est introuvable dans « Import bancaire ».'
+    );
+  }
+
+  const valeursImport = importBancaire
+    .getRange(ligneImport, 1, 1, 15)
+    .getValues()[0];
+  const idDejaLie = String(valeursImport[9] || '').trim();
+  const statutImport = String(valeursImport[10] || '').trim();
+
+  if (idDejaLie || statutImport === 'Classée') {
+    throw new Error(
+      'Cette transaction bancaire est déjà classée' +
+      (idDejaLie ? ' sous ' + idDejaLie : '') +
+      '.'
+    );
+  }
+
+  const montantBancaire = arrondirMontantMixte_(Number(valeursImport[3] || 0));
+
+  if (montantBancaire <= 0) {
+    throw new Error(
+      'La finalisation de revenu direct requiert un montant bancaire positif.'
+    );
+  }
+
+  const idGroupeBase = creerIdGroupeMixte_(idImport);
+  const forfaitsSheet = ss.getSheetByName('Forfaits');
+
+  if (forfaitsSheet) {
+    nettoyerTraitementPartielMixte_(
+      transactions, journal, forfaitsSheet, idImport, idGroupeBase
+    );
+  }
+
+  if (transactionBancaireDejaPresenteMixte_(transactions, idImport)) {
+    throw new Error(
+      'Une transaction comptable utilise déjà la référence bancaire ' +
+      idImport + '.'
+    );
+  }
+
+  const idGroupe = idGroupeForce ||
+    creerIdGroupeDisponibleMixte_(transactions, idImport);
+
+  if (idGroupeForce) {
+    validerAbsenceConflitIdGroupeMixte_(transactions, idGroupe);
+  }
+
+  const lignesRepartition = lireLignesActivesRepartitionMixte_(
+    repartition, idImport
+  );
+
+  if (lignesRepartition.length === 0) {
+    throw new Error(
+      'Aucune ligne de répartition n\'a été trouvée pour ' + idImport + '.'
+    );
+  }
+
+  const lignesActives = lignesRepartition.filter(function(ligne) {
+    return String(ligne.valeurs[5] || '').trim() !== '';
+  });
+
+  if (lignesActives.length === 0) {
+    throw new Error('Aucun compte n\'a été sélectionné.');
+  }
+
+  const planComptable = chargerPlanComptableMixte_(configuration);
+  const comptesActifsRevenu = chargerComptesActifsRevenuDirect_(configuration);
+
+  if (!planComptable['1000']) {
+    throw new Error(
+      'Le compte bancaire 1000 est introuvable dans le plan comptable.'
+    );
+  }
+
+  lignesActives.forEach(function(ligne) {
+    const codeCompte = String(ligne.valeurs[5] || '').trim();
+    const montantLigne = arrondirMontantMixte_(
+      Number(ligne.valeurs[6] || 0) * Number(ligne.valeurs[7] || 0)
+    );
+
+    if (!codeCompte || montantLigne <= 0) {
+      throw new Error(
+        'La ligne ' + ligne.numero +
+        ' contient un compte ou un montant invalide.'
+      );
+    }
+
+    if (exclus.indexOf(codeCompte) !== -1) {
+      throw new Error(
+        'Le compte ' + codeCompte + ' est réservé au mode spécialisé.'
+      );
+    }
+
+    if (!comptesActifsRevenu[codeCompte]) {
+      throw new Error(
+        'Le compte ' + codeCompte +
+        ' n\'est pas un compte de revenu direct actif.'
+      );
+    }
+  });
+
+  const totalReparti = arrondirMontantMixte_(
+    lignesActives.reduce(function(total, ligne) {
+      return total + Number(ligne.valeurs[6] || 0) * Number(ligne.valeurs[7] || 0);
+    }, 0)
+  );
+
+  if (Math.abs(montantBancaire - totalReparti) >= 0.005) {
+    throw new Error(
+      'Le total réparti (' +
+      totalReparti.toFixed(2) +
+      ' $) ne correspond pas au montant bancaire (' +
+      montantBancaire.toFixed(2) +
+      ' $).'
+    );
+  }
+
+  const statutRepartition = String(
+    lignesRepartition[0].valeurs[14] || ''
+  ).trim();
+
+  if (statutRepartition !== 'Prêt') {
+    throw new Error(
+      'Le statut de la répartition doit être « Prêt » avant l\'enregistrement.'
+    );
+  }
+
+  const dateTransaction = valeursImport[1];
+  const descriptionBancaire = String(valeursImport[2] || '').trim();
+  const contact = extraireNomInteracMixte_(descriptionBancaire) || descriptionBancaire;
+  const transactionsCreees = [];
+
+  lignesActives.forEach(function(ligne, index) {
+    const codeCompte = String(ligne.valeurs[5] || '').trim();
+    const montantLigne = arrondirMontantMixte_(
+      Number(ligne.valeurs[6] || 0) * Number(ligne.valeurs[7] || 0)
+    );
+    const programme = String(ligne.valeurs[10] || '').trim();
+    const projet = String(ligne.valeurs[11] || '').trim();
+
+    const idTransaction =
+      idGroupe + '-' + String(index + 1).padStart(2, '0');
+
+    const ligneTransaction = ecrireTransactionMixte_(
+      transactions,
+      idTransaction,
+      dateTransaction,
+      contact,
+      descriptionBancaire,
+      montantLigne,
+      codeCompte,
+      programme,
+      projet,
+      idImport
+    );
+
+    transactionsCreees.push({
+      idTransaction: idTransaction,
+      ligne: ligneTransaction
+    });
+
+    ecrirePaireJournalRevenuDirectMixte_(
+      journal,
+      planComptable,
+      idTransaction,
+      dateTransaction,
+      {
+        description: descriptionBancaire,
+        montant: montantLigne,
+        codeCompte: codeCompte,
+        programme: programme,
+        projet: projet
+      }
+    );
+  });
+
+  const ancienneNote = String(valeursImport[12] || '').trim();
+  const noteRevision = idRevisionSource
+    ? ' | Révision de ' + idRevisionSource + ' vers ' + idGroupe
+    : '';
+  const nouvelleNote =
+    (ancienneNote ? ancienneNote + ' | ' : '') +
+    'Transaction mixte enregistrée : ' + idGroupe + noteRevision;
+
+  importBancaire.getRange(ligneImport, 8, 1, 2).clearContent();
+  importBancaire.getRange(ligneImport, 10).setValue(idGroupe);
+  importBancaire.getRange(ligneImport, 11).setValue('Classée');
+  importBancaire.getRange(ligneImport, 13).setValue(nouvelleNote);
+  importBancaire.getRange(ligneImport, 16, 1, 4).clearDataValidations();
+
+  if (idRevisionSource) {
+    transactionsCreees.forEach(function(item) {
+      transactions
+        .getRange(item.ligne, 15)
+        .setNote('Révision créée à partir de ' + idRevisionSource);
+    });
+  }
+
+  SpreadsheetApp.flush();
+
+  return { idGroupe: idGroupe };
+}
+
+function ecrirePaireJournalRevenuDirectMixte_(
+  journal,
+  planComptable,
+  idTransaction,
+  dateTransaction,
+  ecriture
+) {
+  const montant = arrondirMontantMixte_(ecriture.montant);
+
+  ecrireLigneJournalMixte_(
+    journal,
+    planComptable,
+    'ECR-' + idTransaction + '-D',
+    idTransaction,
+    dateTransaction,
+    '1000',
+    montant,
+    0,
+    ecriture.programme,
+    ecriture.projet,
+    ecriture.description
+  );
+
+  ecrireLigneJournalMixte_(
+    journal,
+    planComptable,
+    'ECR-' + idTransaction + '-C',
+    idTransaction,
+    dateTransaction,
+    ecriture.codeCompte,
+    0,
+    montant,
+    ecriture.programme,
+    ecriture.projet,
+    ecriture.description
   );
 }

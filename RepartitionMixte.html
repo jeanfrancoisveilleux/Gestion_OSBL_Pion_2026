@@ -72,6 +72,35 @@
         color: var(--rouge);
       }
 
+      /* Sélecteur de mode revenu */
+      .choix-mode {
+        display: flex;
+        gap: 24px;
+        padding: 12px 14px;
+        margin-bottom: 16px;
+        border: 1px solid var(--bordure);
+        border-radius: 10px;
+        background: var(--fond);
+      }
+
+      .mode-option {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 13px;
+      }
+
+      .mode-option input[type="radio"] {
+        width: auto;
+        height: auto;
+        padding: 0;
+        border: none;
+        cursor: pointer;
+        accent-color: var(--bleu);
+      }
+
       table {
         width: 100%;
         border-collapse: collapse;
@@ -110,14 +139,14 @@
         border-color: var(--bleu);
       }
 
-      /* Colonnes mode revenu */
+      /* Colonnes mode revenu spécialisé */
       .col-composante { width: 42%; }
       .col-quantite   { width: 13%; }
       .col-prix       { width: 17%; }
       .col-montant    { width: 18%; }
       .col-action     { width: 10%; text-align: center; }
 
-      /* Colonnes mode dépense */
+      /* Colonnes mode dépense et revenu direct */
       .col-compte     { width: 34%; }
       .col-programme  { width: 22%; }
       .col-projet     { width: 18%; }
@@ -274,6 +303,20 @@
       </div>
     </div>
 
+    <!-- Choix de mode (montants positifs seulement) -->
+    <div id="sectionChoixMode" style="display:none">
+      <div class="choix-mode">
+        <label class="mode-option">
+          <input type="radio" name="modeRevenu" id="radioRevenuSpecialise" value="revenu">
+          Entrées, forfaits ou marchandises
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="modeRevenu" id="radioRevenuDirect" value="revenu_direct">
+          Autre revenu comptable
+        </label>
+      </div>
+    </div>
+
     <div id="sectionFournisseur" style="display:none">
       <div class="section-fc">
         <div class="fc-groupe">
@@ -328,6 +371,11 @@
       const DONNEES = <?!= donnees ?>;
       const MAX_LIGNES = 5;
       const EST_DEPENSE = DONNEES.typeMouvement === 'depense';
+      // Comptes de revenus directs disponibles pour les deux modes positifs
+      const COMPTES_REVENUS_DIRECTS =
+        DONNEES.comptesRevenusDirects || DONNEES.comptes || [];
+
+      let modeActuel = DONNEES.typeMouvement || 'revenu';
       let lignes = [];
       let idFournisseurSelectionne = '';
       let idContactSelectionne = '';
@@ -349,7 +397,7 @@
         return Math.round((nombre(valeur) + Number.EPSILON) * 100) / 100;
       }
 
-      /* ── Mode revenu ─────────────────────────────────────── */
+      /* ── Mode revenu spécialisé ──────────────────────────── */
 
       function prixParDefaut(composante) {
         const option = DONNEES.options.find(
@@ -406,7 +454,9 @@
           const rangee = document.createElement('tr');
 
           const celluleComposante = document.createElement('td');
-          celluleComposante.appendChild(creerSelectionComposante(ligne.composante, index));
+          celluleComposante.appendChild(
+            creerSelectionComposante(ligne.composante, index)
+          );
 
           const celluleQuantite = document.createElement('td');
           celluleQuantite.appendChild(
@@ -436,7 +486,10 @@
             }
           }));
 
-          rangee.append(celluleComposante, celluleQuantite, cellulePrix, celluleMontant, celluleAction);
+          rangee.append(
+            celluleComposante, celluleQuantite, cellulePrix,
+            celluleMontant, celluleAction
+          );
           corps.appendChild(rangee);
         });
 
@@ -554,7 +607,9 @@
 
           const tdMontant = document.createElement('td');
           tdMontant.className = 'col-montant-dep';
-          tdMontant.appendChild(creerChampMontantDepense(ligne.montant || '', index));
+          tdMontant.appendChild(
+            creerChampMontantDepense(ligne.montant || '', index)
+          );
 
           const tdAction = document.createElement('td');
           tdAction.className = 'col-action';
@@ -572,11 +627,82 @@
         calculerTotaux();
       }
 
+      /* ── Mode revenu comptable direct ────────────────────── */
+
+      function creerSelectionCompteRevenuDirect(codeSelectionne, index) {
+        const sel = document.createElement('select');
+        sel.setAttribute('aria-label', 'Compte de revenu');
+
+        const vide = document.createElement('option');
+        vide.value = '';
+        vide.textContent = 'Sélectionner un compte…';
+        sel.appendChild(vide);
+
+        COMPTES_REVENUS_DIRECTS.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.code;
+          opt.textContent = c.code + ' – ' + c.nom;
+          opt.selected = c.code === codeSelectionne;
+          sel.appendChild(opt);
+        });
+
+        sel.addEventListener('change', () => {
+          lignes[index].compte = sel.value;
+          calculerTotaux();
+        });
+
+        return sel;
+      }
+
+      function afficherLignesRevenuDirect() {
+        const corps = document.getElementById('lignes');
+        corps.textContent = '';
+
+        lignes.forEach((ligne, index) => {
+          const rangee = document.createElement('tr');
+
+          const tdCompte = document.createElement('td');
+          tdCompte.className = 'col-compte';
+          tdCompte.appendChild(
+            creerSelectionCompteRevenuDirect(ligne.compte, index)
+          );
+
+          const tdProg = document.createElement('td');
+          tdProg.className = 'col-programme';
+          tdProg.appendChild(creerSelectionProgramme(ligne.programme, index));
+
+          const tdProj = document.createElement('td');
+          tdProj.className = 'col-projet';
+          tdProj.appendChild(creerSelectionProjet(ligne.projet, index));
+
+          const tdMontant = document.createElement('td');
+          tdMontant.className = 'col-montant-dep';
+          tdMontant.appendChild(
+            creerChampMontantDepense(ligne.montant || '', index)
+          );
+
+          const tdAction = document.createElement('td');
+          tdAction.className = 'col-action';
+          tdAction.appendChild(creerBoutonSupprimer(index, function() {
+            if (lignes.length === 0) {
+              lignes.push({
+                compte: '', programme: '', projet: '', montant: 0
+              });
+            }
+          }));
+
+          rangee.append(tdCompte, tdProg, tdProj, tdMontant, tdAction);
+          corps.appendChild(rangee);
+        });
+
+        document.getElementById('ajouter').disabled = lignes.length >= MAX_LIGNES;
+        calculerTotaux();
+      }
+
       /* ── Fournisseur / Contact (mode dépense) ───────────── */
 
       function filtrerContacts(idFournisseur) {
         const sel = document.getElementById('selContact');
-        // Utiliser la variable de module (pas sel.value) pour savoir quel contact garder
         const valeurActuelle = idContactSelectionne;
         sel.textContent = '';
 
@@ -601,7 +727,6 @@
             sel.appendChild(opt);
           });
 
-        // Si le contact actuel n'appartient pas au nouveau fournisseur, vider
         if (!trouve) {
           sel.value = '';
           idContactSelectionne = '';
@@ -637,7 +762,6 @@
 
         selF.addEventListener('change', function() {
           idFournisseurSelectionne = selF.value;
-          // filtrerContacts gère le reset de idContactSelectionne si nécessaire
           filtrerContacts(idFournisseurSelectionne);
           calculerTotaux();
         });
@@ -664,8 +788,10 @@
       }
 
       function afficherLignes() {
-        if (EST_DEPENSE) {
+        if (modeActuel === 'depense') {
           afficherLignesDepense();
+        } else if (modeActuel === 'revenu_direct') {
+          afficherLignesRevenuDirect();
         } else {
           afficherLignesRevenu();
         }
@@ -674,20 +800,31 @@
       function calculerTotaux() {
         let total = 0;
 
-        if (EST_DEPENSE) {
-          lignes.forEach((ligne, index) => {
-            const montant = arrondir(nombre(ligne.montant));
-            total += montant;
+        if (modeActuel === 'depense') {
+          lignes.forEach(ligne => {
+            total += arrondir(nombre(ligne.montant));
           });
-
           total = arrondir(total);
-          const cible = arrondir(DONNEES.montantAbsolu || 0);
-          const reste = arrondir(cible - total);
-          const lignesValides = lignes.length > 0 &&
+          const cibleDep = arrondir(DONNEES.montantAbsolu || 0);
+          const resteDep = arrondir(cibleDep - total);
+          const lignesValidesDep = lignes.length > 0 &&
             lignes.every(l => l.compte && nombre(l.montant) > 0) &&
             !!idFournisseurSelectionne;
 
-          mettreAJourAffichageTotaux(total, reste, lignesValides);
+          mettreAJourAffichageTotaux(total, resteDep, lignesValidesDep);
+
+        } else if (modeActuel === 'revenu_direct') {
+          lignes.forEach(ligne => {
+            total += arrondir(nombre(ligne.montant));
+          });
+          total = arrondir(total);
+          const cibleRD = arrondir(DONNEES.montant || 0);
+          const resteRD = arrondir(cibleRD - total);
+          const lignesValidesRD = lignes.length > 0 &&
+            lignes.every(l => l.compte && nombre(l.montant) > 0);
+
+          mettreAJourAffichageTotaux(total, resteRD, lignesValidesRD);
+
         } else {
           lignes.forEach((ligne, index) => {
             const montant = arrondir(
@@ -704,14 +841,14 @@
           });
 
           total = arrondir(total);
-          const reste = arrondir(nombre(DONNEES.montant) - total);
-          const lignesValides = lignes.length > 0 && lignes.every(ligne =>
+          const resteRev = arrondir(nombre(DONNEES.montant) - total);
+          const lignesValidesRev = lignes.length > 0 && lignes.every(ligne =>
             ligne.composante &&
             nombre(ligne.quantite) > 0 &&
             nombre(ligne.prixUnitaire) >= 0
           );
 
-          mettreAJourAffichageTotaux(total, reste, lignesValides);
+          mettreAJourAffichageTotaux(total, resteRev, lignesValidesRev);
         }
       }
 
@@ -738,6 +875,62 @@
         message.className = 'message ' + (type || '');
       }
 
+      /* ── Changement de mode (montants positifs) ──────────── */
+
+      function appliquerEntetesRevenu() {
+        document.getElementById('enTetes').innerHTML =
+          '<tr>' +
+          '<th class="col-composante">Composante</th>' +
+          '<th class="col-quantite">Quantité</th>' +
+          '<th class="col-prix">Prix unitaire</th>' +
+          '<th class="col-montant">Montant</th>' +
+          '<th class="col-action"></th>' +
+          '</tr>';
+      }
+
+      function appliquerEntetesRevenuDirect() {
+        document.getElementById('enTetes').innerHTML =
+          '<tr>' +
+          '<th class="col-compte">Compte de revenu</th>' +
+          '<th class="col-programme">Programme</th>' +
+          '<th class="col-projet">Projet</th>' +
+          '<th class="col-montant-dep">Montant ($)</th>' +
+          '<th class="col-action"></th>' +
+          '</tr>';
+      }
+
+      function changerMode(nouveauMode) {
+        if (nouveauMode === modeActuel) {
+          return;
+        }
+        modeActuel = nouveauMode;
+
+        if (modeActuel === 'revenu_direct') {
+          lignes = [{
+            compte: '',
+            programme: '',
+            projet: '',
+            montant: arrondir(nombre(DONNEES.montant))
+          }];
+          appliquerEntetesRevenuDirect();
+          document.getElementById('sousTitre').textContent =
+            "Ajoutez jusqu'à cinq lignes de revenu. " +
+            "Le total doit correspondre exactement au montant bancaire.";
+          document.getElementById('ajouter').textContent = '+ Ajouter une ligne';
+        } else {
+          lignes = [{ composante: '', quantite: 1, prixUnitaire: 0 }];
+          appliquerEntetesRevenu();
+          document.getElementById('sousTitre').textContent =
+            "Ajoutez jusqu'à cinq composantes. " +
+            "Le total doit correspondre exactement au montant bancaire.";
+          document.getElementById('ajouter').textContent = '+ Ajouter une composante';
+        }
+
+        afficherLignes();
+      }
+
+      /* ── Enregistrement ──────────────────────────────────── */
+
       function enregistrer() {
         const bouton = document.getElementById('enregistrer');
         bouton.disabled = true;
@@ -752,15 +945,17 @@
           })
           .withFailureHandler(erreur => {
             afficherMessage(
-              erreur && erreur.message ? erreur.message : 'Une erreur est survenue.',
+              erreur && erreur.message
+                ? erreur.message
+                : 'Une erreur est survenue.',
               'erreur'
             );
             bouton.textContent = DONNEES.boutonPrincipal || 'Enregistrer';
             calculerTotaux();
           });
 
-        if (EST_DEPENSE) {
-          const donnees = {
+        if (modeActuel === 'depense') {
+          const donneesDepense = {
             idImport: DONNEES.idImport,
             idTransactionSource: DONNEES.idTransactionSource || '',
             idFournisseur: idFournisseurSelectionne,
@@ -774,12 +969,31 @@
           };
 
           if (DONNEES.mode === 'revision') {
-            appel.enregistrerRevisionDepenseBancaireMixte(donnees);
+            appel.enregistrerRevisionDepenseBancaireMixte(donneesDepense);
           } else {
-            appel.enregistrerEtComptabiliserDepenseBancaireMixte(donnees);
+            appel.enregistrerEtComptabiliserDepenseBancaireMixte(donneesDepense);
           }
+
+        } else if (modeActuel === 'revenu_direct') {
+          const donneesRevenuDirect = {
+            idImport: DONNEES.idImport,
+            idTransactionSource: DONNEES.idTransactionSource || '',
+            lignes: lignes.map(l => ({
+              compte: l.compte,
+              programme: l.programme || '',
+              projet: l.projet || '',
+              montant: nombre(l.montant)
+            }))
+          };
+
+          if (DONNEES.mode === 'revision') {
+            appel.enregistrerRevisionRevenuDirectMixte(donneesRevenuDirect);
+          } else {
+            appel.enregistrerEtComptabiliserRevenuDirectMixte(donneesRevenuDirect);
+          }
+
         } else {
-          const donnees = {
+          const donneesRevenu = {
             idImport: DONNEES.idImport,
             idTransactionSource: DONNEES.idTransactionSource || '',
             lignes: lignes.map(ligne => ({
@@ -790,9 +1004,9 @@
           };
 
           if (DONNEES.mode === 'revision') {
-            appel.enregistrerRevisionTransactionMixte(donnees);
+            appel.enregistrerRevisionTransactionMixte(donneesRevenu);
           } else {
-            appel.enregistrerEtComptabiliserTransactionMixte(donnees);
+            appel.enregistrerEtComptabiliserTransactionMixte(donneesRevenu);
           }
         }
       }
@@ -838,26 +1052,52 @@
         }));
 
         initialiserSectionFournisseur();
-      } else {
-        document.getElementById('enTetes').innerHTML =
-          '<tr>' +
-          '<th class="col-composante">Composante</th>' +
-          '<th class="col-quantite">Quantité</th>' +
-          '<th class="col-prix">Prix unitaire</th>' +
-          '<th class="col-montant">Montant</th>' +
-          '<th class="col-action"></th>' +
-          '</tr>';
 
-        lignes = DONNEES.lignes.map(ligne => ({
-          composante: ligne.composante || '',
-          quantite: nombre(ligne.quantite || 1),
-          prixUnitaire: nombre(ligne.prixUnitaire || 0)
-        }));
+      } else {
+        // Montant positif : afficher le sélecteur de mode
+        document.getElementById('sectionChoixMode').style.display = '';
+
+        if (modeActuel === 'revenu_direct') {
+          document.getElementById('radioRevenuDirect').checked = true;
+          appliquerEntetesRevenuDirect();
+          document.getElementById('sousTitre').textContent =
+            "Ajoutez jusqu'à cinq lignes de revenu. " +
+            "Le total doit correspondre exactement au montant bancaire.";
+          document.getElementById('ajouter').textContent = '+ Ajouter une ligne';
+
+          lignes = DONNEES.lignes.map(l => ({
+            compte: l.compte || '',
+            programme: l.programme || '',
+            projet: l.projet || '',
+            montant: nombre(l.montant || 0)
+          }));
+
+        } else {
+          document.getElementById('radioRevenuSpecialise').checked = true;
+          appliquerEntetesRevenu();
+
+          lignes = DONNEES.lignes.map(ligne => ({
+            composante: ligne.composante || '',
+            quantite: nombre(ligne.quantite || 1),
+            prixUnitaire: nombre(ligne.prixUnitaire || 0)
+          }));
+        }
+
+        // Écouter les changements de mode
+        document.querySelectorAll('input[name="modeRevenu"]').forEach(radio => {
+          radio.addEventListener('change', function() {
+            if (this.checked) {
+              changerMode(this.value);
+            }
+          });
+        });
       }
 
       document.getElementById('ajouter').addEventListener('click', () => {
         if (lignes.length < MAX_LIGNES) {
-          if (EST_DEPENSE) {
+          if (modeActuel === 'depense') {
+            lignes.push({ compte: '', programme: '', projet: '', montant: 0 });
+          } else if (modeActuel === 'revenu_direct') {
             lignes.push({ compte: '', programme: '', projet: '', montant: 0 });
           } else {
             lignes.push({ composante: '', quantite: 1, prixUnitaire: 0 });
