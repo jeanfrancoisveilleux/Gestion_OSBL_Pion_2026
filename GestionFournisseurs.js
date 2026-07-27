@@ -38,7 +38,7 @@ function installerOngletFournisseurs_(ss) {
 
   // En-tête de section (ligne 1)
   if (!String(feuille.getRange(1, 1).getValue() || '').trim()) {
-    feuille.getRange('A1:K1').merge()
+    feuille.getRange('A1:L1').merge()
       .setValue('Fournisseurs')
       .setBackground('#e8f0fe')
       .setFontWeight('bold');
@@ -47,7 +47,8 @@ function installerOngletFournisseurs_(ss) {
   // En-têtes de colonnes (ligne 5)
   const entetes = [
     'ID fournisseur', 'Fournisseur', 'Nom légal', 'Courriel général',
-    'Téléphone', 'Adresse', 'Ville', 'Province', 'Code postal', 'Actif', 'Notes'
+    'Téléphone', 'Adresse', 'Ville', 'Province', 'Pays', 'Code postal',
+    'Actif', 'Notes'
   ];
 
   const cellEntetes = feuille.getRange(5, 1, 1, entetes.length);
@@ -89,7 +90,7 @@ function installerOngletFournisseurs_(ss) {
       const lg = prochaineLigneLibre_(feuille, 1, 6);
       feuille.getRange(lg, 1).setNumberFormat('@').setValue(f[0]);
       feuille.getRange(lg, 2).setValue(f[1]);
-      feuille.getRange(lg, 10).setValue('Oui');
+      feuille.getRange(lg, 11).setValue('Oui');
     }
   });
 
@@ -97,7 +98,9 @@ function installerOngletFournisseurs_(ss) {
     feuille.setFrozenRows(5);
   }
 
-  const largeurs = [130, 200, 200, 175, 120, 180, 120, 90, 100, 70, 200];
+  const largeurs = [
+    130, 200, 200, 175, 120, 180, 120, 90, 100, 100, 70, 200
+  ];
   largeurs.forEach(function(largeur, index) {
     feuille.setColumnWidth(index + 1, largeur);
   });
@@ -115,7 +118,7 @@ function installerOngletContacts_(ss) {
 
   // En-tête de section (ligne 1)
   if (!String(feuille.getRange(1, 1).getValue() || '').trim()) {
-    feuille.getRange('A1:N1').merge()
+    feuille.getRange('A1:O1').merge()
       .setValue('Contacts')
       .setBackground('#e8f0fe')
       .setFontWeight('bold');
@@ -125,7 +128,8 @@ function installerOngletContacts_(ss) {
   const entetes = [
     'ID contact', 'ID fournisseur', 'Fournisseur', 'Nom du contact',
     'Fonction', 'Courriel', 'Téléphone', 'Adresse',
-    'Ville', 'Province', 'Code postal', 'Contact principal', 'Actif', 'Notes'
+    'Ville', 'Province', 'Pays', 'Code postal', 'Contact principal',
+    'Actif', 'Notes'
   ];
 
   const cellEntetes = feuille.getRange(5, 1, 1, entetes.length);
@@ -157,15 +161,18 @@ function installerOngletContacts_(ss) {
     feuille.getRange(lg, 2).setNumberFormat('@').setValue('FOU-0006');
     feuille.getRange(lg, 3).setValue('Amusement Jacques-Cartier');
     feuille.getRange(lg, 4).setValue('Jean-François Bertrand');
-    feuille.getRange(lg, 12).setValue('Oui'); // Contact principal
-    feuille.getRange(lg, 13).setValue('Oui'); // Actif
+    feuille.getRange(lg, 13).setValue('Oui'); // Contact principal
+    feuille.getRange(lg, 14).setValue('Oui'); // Actif
   }
 
   if (!feuille.getFrozenRows()) {
     feuille.setFrozenRows(5);
   }
 
-  const largeurs = [110, 120, 200, 200, 150, 175, 120, 175, 120, 90, 100, 120, 70, 200];
+  const largeurs = [
+    110, 120, 200, 200, 150, 175, 120, 175, 120, 90, 100, 100,
+    120, 70, 200
+  ];
   largeurs.forEach(function(largeur, index) {
     feuille.setColumnWidth(index + 1, largeur);
   });
@@ -488,6 +495,42 @@ function repairerSyncFournisseurImportClassee_(ss) {
 
 // ─── Accès aux données (utilisé par FinalisationMixtes.js et ImportCsv.js) ───
 
+function obtenirIndexEntetesGestionFournisseurs_(feuille, entetesRequises) {
+  const derniereColonne = feuille.getLastColumn();
+
+  if (derniereColonne < 1) {
+    throw new Error(
+      "L'onglet « " + feuille.getName() + " » ne contient aucun en-tête."
+    );
+  }
+
+  const entetes = feuille
+    .getRange(5, 1, 1, derniereColonne)
+    .getDisplayValues()[0]
+    .map(function(entete) {
+      return String(entete || '').trim();
+    });
+  const index = {};
+
+  entetesRequises.forEach(function(enteteRequise) {
+    const position = entetes.indexOf(enteteRequise);
+
+    if (position === -1) {
+      throw new Error(
+        "L'en-tête « " + enteteRequise + " » est introuvable dans l'onglet « " +
+        feuille.getName() + ' ».'
+      );
+    }
+
+    index[enteteRequise] = position;
+  });
+
+  return {
+    index: index,
+    nombreColonnes: derniereColonne
+  };
+}
+
 function chargerFournisseursActifs_(ss) {
   const feuille = ss.getSheetByName('Fournisseurs');
 
@@ -495,19 +538,29 @@ function chargerFournisseursActifs_(ss) {
     return [];
   }
 
+  const structure = obtenirIndexEntetesGestionFournisseurs_(
+    feuille,
+    ['ID fournisseur', 'Fournisseur', 'Actif']
+  );
+
   return feuille
-    .getRange(6, 1, feuille.getLastRow() - 5, 10)
-    .getValues()
+    .getRange(
+      6,
+      1,
+      feuille.getLastRow() - 5,
+      structure.nombreColonnes
+    )
+    .getDisplayValues()
     .filter(function(ligne) {
       return (
-        String(ligne[0] || '').trim() &&
-        String(ligne[9] || '').trim() === 'Oui'
+        String(ligne[structure.index['ID fournisseur']] || '').trim() &&
+        String(ligne[structure.index.Actif] || '').trim() === 'Oui'
       );
     })
     .map(function(ligne) {
       return {
-        id: String(ligne[0]).trim(),
-        nom: String(ligne[1] || '').trim()
+        id: String(ligne[structure.index['ID fournisseur']] || '').trim(),
+        nom: String(ligne[structure.index.Fournisseur] || '').trim()
       };
     });
 }
@@ -519,20 +572,31 @@ function chargerTousContacts_(ss) {
     return [];
   }
 
+  const structure = obtenirIndexEntetesGestionFournisseurs_(
+    feuille,
+    ['ID contact', 'ID fournisseur', 'Nom du contact', 'Actif']
+  );
+
   return feuille
-    .getRange(6, 1, feuille.getLastRow() - 5, 13)
-    .getValues()
+    .getRange(
+      6,
+      1,
+      feuille.getLastRow() - 5,
+      structure.nombreColonnes
+    )
+    .getDisplayValues()
     .filter(function(ligne) {
       return (
-        String(ligne[0] || '').trim() &&
-        String(ligne[12] || '').trim() === 'Oui'
+        String(ligne[structure.index['ID contact']] || '').trim() &&
+        String(ligne[structure.index.Actif] || '').trim() === 'Oui'
       );
     })
     .map(function(ligne) {
       return {
-        id: String(ligne[0]).trim(),
-        idFournisseur: String(ligne[1] || '').trim(),
-        nom: String(ligne[3] || '').trim()
+        id: String(ligne[structure.index['ID contact']] || '').trim(),
+        idFournisseur:
+          String(ligne[structure.index['ID fournisseur']] || '').trim(),
+        nom: String(ligne[structure.index['Nom du contact']] || '').trim()
       };
     });
 }
@@ -670,20 +734,33 @@ function validerFournisseurEtContact_(ss, idFournisseur, idContact) {
     throw new Error("L'onglet Fournisseurs est introuvable ou vide.");
   }
 
+  const structureF = obtenirIndexEntetesGestionFournisseurs_(
+    feuilleF,
+    ['ID fournisseur', 'Fournisseur', 'Actif']
+  );
   const valeursF = feuilleF
-    .getRange(6, 1, feuilleF.getLastRow() - 5, 10)
-    .getValues();
+    .getRange(
+      6,
+      1,
+      feuilleF.getLastRow() - 5,
+      structureF.nombreColonnes
+    )
+    .getDisplayValues();
 
   let fournisseurTrouve = null;
 
   for (let i = 0; i < valeursF.length; i += 1) {
-    const id = String(valeursF[i][0] || '').trim();
+    const id = String(
+      valeursF[i][structureF.index['ID fournisseur']] || ''
+    ).trim();
 
     if (id !== idFournisseur) {
       continue;
     }
 
-    const actif = String(valeursF[i][9] || '').trim();
+    const actif = String(
+      valeursF[i][structureF.index.Actif] || ''
+    ).trim();
 
     if (actif !== 'Oui') {
       throw new Error(
@@ -693,7 +770,9 @@ function validerFournisseurEtContact_(ss, idFournisseur, idContact) {
 
     fournisseurTrouve = {
       id: id,
-      nom: String(valeursF[i][1] || '').trim()
+      nom: String(
+        valeursF[i][structureF.index.Fournisseur] || ''
+      ).trim()
     };
 
     break;
@@ -714,20 +793,33 @@ function validerFournisseurEtContact_(ss, idFournisseur, idContact) {
       throw new Error("L'onglet Contacts est introuvable ou vide.");
     }
 
+    const structureC = obtenirIndexEntetesGestionFournisseurs_(
+      feuilleC,
+      ['ID contact', 'ID fournisseur', 'Nom du contact', 'Actif']
+    );
     const valeursC = feuilleC
-      .getRange(6, 1, feuilleC.getLastRow() - 5, 13)
-      .getValues();
+      .getRange(
+        6,
+        1,
+        feuilleC.getLastRow() - 5,
+        structureC.nombreColonnes
+      )
+      .getDisplayValues();
 
     let contactValide = false;
 
     for (let i = 0; i < valeursC.length; i += 1) {
-      const idC = String(valeursC[i][0] || '').trim();
+      const idC = String(
+        valeursC[i][structureC.index['ID contact']] || ''
+      ).trim();
 
       if (idC !== idContact) {
         continue;
       }
 
-      const idF = String(valeursC[i][1] || '').trim();
+      const idF = String(
+        valeursC[i][structureC.index['ID fournisseur']] || ''
+      ).trim();
 
       if (idF !== idFournisseur) {
         throw new Error(
@@ -736,7 +828,9 @@ function validerFournisseurEtContact_(ss, idFournisseur, idContact) {
         );
       }
 
-      const actifC = String(valeursC[i][12] || '').trim();
+      const actifC = String(
+        valeursC[i][structureC.index.Actif] || ''
+      ).trim();
 
       if (actifC !== 'Oui') {
         throw new Error('Le contact ' + idContact + ' n\'est pas actif.');
@@ -744,7 +838,9 @@ function validerFournisseurEtContact_(ss, idFournisseur, idContact) {
 
       contactTrouve = {
         id: idC,
-        nom: String(valeursC[i][3] || '').trim()
+        nom: String(
+          valeursC[i][structureC.index['Nom du contact']] || ''
+        ).trim()
       };
 
       contactValide = true;

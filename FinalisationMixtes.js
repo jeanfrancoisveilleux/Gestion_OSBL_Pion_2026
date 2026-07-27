@@ -857,7 +857,11 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
     let nomFournisseur = '';
     let idContact = '';
     let nomContact = '';
-    let regle = null;
+    const regle = rechercherRegleBancaire_(
+      ss,
+      String(valeurs[2] || '').trim(),
+      montant
+    );
 
     // Révision : priorité aux valeurs confirmées de la Transaction active (R:S:T, D)
     if (modeRevision && idTransactionSource) {
@@ -879,14 +883,6 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
       const nomFournisseurSuggere = String(valeurs[16] || '').trim();
       const idContactSuggere = String(valeurs[17] || '').trim();
       const nomContactSuggere = String(valeurs[18] || '').trim();
-
-      if (!idFournisseurSuggere) {
-        regle = rechercherRegleBancaire_(
-          ss,
-          String(valeurs[2] || '').trim(),
-          montant
-        );
-      }
 
       idFournisseur = idFournisseurSuggere || (regle ? regle.idFournisseur : '');
       nomFournisseur = nomFournisseurSuggere || (regle ? regle.nomFournisseur : '');
