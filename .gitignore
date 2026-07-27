@@ -1,4 +1,5 @@
-.clasp.json
+﻿.clasp.json
 .clasprc.json
 node_modules/
-*.log.claude/
+*.log
+.claude/
