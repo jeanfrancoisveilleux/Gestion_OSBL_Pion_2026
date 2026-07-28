@@ -107,8 +107,8 @@ function preparerOngletRapportFournisseurs_(feuille) {
   feuille.getRange('A2:J2')
     .merge()
     .setValue(
-      'Vue automatique basée sur le Journal. Les annulations sont ' +
-      'compensées par les écritures inverses.'
+      'Comparaison automatique entre les sorties bancaires et les ' +
+      'dépenses comptabilisées du Journal.'
     )
     .setFontColor('#5f6368')
     .setWrap(true);
@@ -130,7 +130,7 @@ function preparerOngletRapportFournisseurs_(feuille) {
     );
 
   feuille.getRange('A4')
-    .setValue('Dépenses nettes fournisseurs')
+    .setValue('Total achats')
     .setFontWeight('bold');
 
   feuille.getRange('B4')
@@ -140,57 +140,47 @@ function preparerOngletRapportFournisseurs_(feuille) {
     .setFontWeight('bold');
 
   feuille.getRange('D4')
-    .setValue('Fournisseur principal')
+    .setValue('Dépenses comptabilisées')
     .setFontWeight('bold');
 
   feuille.getRange('E4')
-    .setFormula(
-      '=IF(B4=0,"—",IFERROR(INDEX(B7:B,MATCH(MAX(C7:C),C7:C,0)),"—"))'
-    )
-    .setBackground('#e8f0fe')
-    .setFontWeight('bold');
-
-  feuille.getRange('G4')
-    .setValue('Montant principal')
-    .setFontWeight('bold');
-
-  feuille.getRange('H4')
-    .setFormula('=IFERROR(MAX(C7:C),0)')
+    .setFormula('=IFERROR(SUM(D7:D),0)')
     .setNumberFormat('$#,##0.00;[Red]-$#,##0.00')
     .setBackground('#e8f0fe')
     .setFontWeight('bold');
 
-  feuille.getRange('A5:C5')
-    .merge()
-    .setValue('Sommaire par fournisseur')
-    .setBackground('#f1f3f4')
+  feuille.getRange('G4')
+    .setValue('Différence totale')
     .setFontWeight('bold');
 
-  feuille.getRange('E5:J5')
+  feuille.getRange('H4')
+    .setFormula('=IFERROR(SUM(E7:E),0)')
+    .setNumberFormat('$#,##0.00;[Red]-$#,##0.00')
+    .setBackground('#e8f0fe')
+    .setFontWeight('bold');
+
+  feuille.getRange('A5:E5')
     .merge()
-    .setValue('Détail par fournisseur, programme et compte')
+    .setValue('Sommaire par fournisseur')
     .setBackground('#f1f3f4')
     .setFontWeight('bold');
 
   feuille.setFrozenRows(6);
 
   const largeurs = [
-    125, 210, 135, 25, 125, 190, 170, 90, 210, 135
+    125, 210, 135, 175, 135, 25, 150, 135, 25, 25
   ];
 
   largeurs.forEach(function(largeur, index) {
     feuille.setColumnWidth(index + 1, largeur);
   });
 
-  feuille.getRange('A6:J6')
+  feuille.getRange('A6:E6')
     .setBackground('#f1f3f4')
     .setFontWeight('bold')
     .setWrap(true);
 
-  feuille.getRange('C7:C1000')
-    .setNumberFormat('$#,##0.00;[Red]-$#,##0.00');
-
-  feuille.getRange('J7:J1000')
+  feuille.getRange('C7:E1000')
     .setNumberFormat('$#,##0.00;[Red]-$#,##0.00');
 }
 
@@ -198,65 +188,44 @@ function ecrireFormulesRapportFournisseurs_(feuille) {
   feuille.getRange('A6').setFormula(
     formuleSommaireRapportFournisseurs_()
   );
-
-  feuille.getRange('E6').setFormula(
-    formuleDetailRapportFournisseurs_()
-  );
 }
 
 function formuleSommaireRapportFournisseurs_() {
   return '=IFERROR(QUERY(QUERY(FILTER({' +
     'Journal!$O$6:$O,' +
     'Journal!$P$6:$P,' +
-    'ARRAYFORMULA(Journal!$G$6:$G-Journal!$H$6:$H)' +
+    'ARRAYFORMULA((' +
+    'TO_TEXT(Journal!$D$6:$D)="1000")*(' +
+    'Journal!$H$6:$H-Journal!$G$6:$G)),' +
+    'ARRAYFORMULA((' +
+    'TO_TEXT(Journal!$D$6:$D)<>"1000")*((' +
+    'Journal!$F$6:$F="Dépense")+(' +
+    'Journal!$F$6:$F="Actif"))*(' +
+    'Journal!$G$6:$G-Journal!$H$6:$H)),' +
+    'ARRAYFORMULA(((' +
+    'TO_TEXT(Journal!$D$6:$D)="1000")*(' +
+    'Journal!$H$6:$H-Journal!$G$6:$G))-((' +
+    'TO_TEXT(Journal!$D$6:$D)<>"1000")*((' +
+    'Journal!$F$6:$F="Dépense")+(' +
+    'Journal!$F$6:$F="Actif"))*(' +
+    'Journal!$G$6:$G-Journal!$H$6:$H)))' +
     '},' +
     'Journal!$O$6:$O<>"",' +
-    'ARRAYFORMULA(YEAR(Journal!$C$6:$C))=$B$3,' +
-    'ARRAYFORMULA(TO_TEXT(Journal!$D$6:$D))<>"1000",' +
-    'ARRAYFORMULA((' +
-    'Journal!$F$6:$F="Dépense")+(' +
-    'Journal!$F$6:$F="Actif"))' +
+    'ARRAYFORMULA(YEAR(Journal!$C$6:$C))=$B$3' +
     '),' +
-    '"select Col1,Col2,sum(Col3) ' +
+    '"select Col1,Col2,sum(Col3),sum(Col4),sum(Col5) ' +
     'group by Col1,Col2 ' +
     'label Col1 \'ID fournisseur\',Col2 \'Fournisseur\',' +
-    'sum(Col3) \'Dépenses nettes\'",' +
+    'sum(Col3) \'Total achats\',' +
+    'sum(Col4) \'Dépenses comptabilisées\',' +
+    'sum(Col5) \'Différence\'",' +
     '0),' +
-    '"select Col1,Col2,Col3 ' +
-    'where Col3 <> 0 ' +
-    'order by Col3 desc",' +
+    '"select Col1,Col2,Col3,Col4,Col5 ' +
+    'where Col3 <> 0 or Col4 <> 0 ' +
+    'order by Col2",' +
     '1),' +
-    '{"ID fournisseur","Fournisseur","Dépenses nettes"})';
-}
-
-function formuleDetailRapportFournisseurs_() {
-  return '=IFERROR(QUERY(QUERY(FILTER({' +
-    'Journal!$O$6:$O,' +
-    'Journal!$P$6:$P,' +
-    'Journal!$I$6:$I,' +
-    'ARRAYFORMULA(TO_TEXT(Journal!$D$6:$D)),' +
-    'Journal!$E$6:$E,' +
-    'ARRAYFORMULA(Journal!$G$6:$G-Journal!$H$6:$H)' +
-    '},' +
-    'Journal!$O$6:$O<>"",' +
-    'ARRAYFORMULA(YEAR(Journal!$C$6:$C))=$B$3,' +
-    'ARRAYFORMULA(TO_TEXT(Journal!$D$6:$D))<>"1000",' +
-    'ARRAYFORMULA((' +
-    'Journal!$F$6:$F="Dépense")+(' +
-    'Journal!$F$6:$F="Actif"))' +
-    '),' +
-    '"select Col1,Col2,Col3,Col4,Col5,sum(Col6) ' +
-    'group by Col1,Col2,Col3,Col4,Col5 ' +
-    'label Col1 \'ID fournisseur\',Col2 \'Fournisseur\',' +
-    'Col3 \'Programme\',Col4 \'Code compte\',' +
-    'Col5 \'Compte\',sum(Col6) \'Dépenses nettes\'",' +
-    '0),' +
-    '"select Col1,Col2,Col3,Col4,Col5,Col6 ' +
-    'where Col6 <> 0 ' +
-    'order by Col2,Col6 desc",' +
-    '1),' +
-    '{"ID fournisseur","Fournisseur","Programme",' +
-    '"Code compte","Compte","Dépenses nettes"})';
+    '{"ID fournisseur","Fournisseur","Total achats",' +
+    '"Dépenses comptabilisées","Différence"})';
 }
 
 function protegerRapportFournisseurs_(feuille) {
