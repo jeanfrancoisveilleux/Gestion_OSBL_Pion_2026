@@ -205,22 +205,22 @@ function ecrireFormulesRapportFournisseurs_(feuille) {
 }
 
 function formuleSommaireRapportFournisseurs_() {
-  return '=IFERROR(QUERY(QUERY({' +
+  return '=IFERROR(QUERY(QUERY(FILTER({' +
     'Journal!$O$6:$O,' +
     'Journal!$P$6:$P,' +
-    'Journal!$C$6:$C,' +
-    'ARRAYFORMULA(TO_TEXT(Journal!$D$6:$D)),' +
-    'Journal!$F$6:$F,' +
-    'Journal!$G$6:$G-Journal!$H$6:$H' +
+    'ARRAYFORMULA(Journal!$G$6:$G-Journal!$H$6:$H)' +
     '},' +
-    '"select Col1,Col2,sum(Col6) ' +
-    'where Col1 is not null ' +
-    'and year(Col3) = "&$B$3&" ' +
-    'and Col4 <> \'1000\' ' +
-    'and (Col5 = \'Dépense\' or Col5 = \'Actif\') ' +
+    'Journal!$O$6:$O<>"",' +
+    'ARRAYFORMULA(YEAR(Journal!$C$6:$C))=$B$3,' +
+    'ARRAYFORMULA(TO_TEXT(Journal!$D$6:$D))<>"1000",' +
+    'ARRAYFORMULA((' +
+    'Journal!$F$6:$F="Dépense")+(' +
+    'Journal!$F$6:$F="Actif"))' +
+    '),' +
+    '"select Col1,Col2,sum(Col3) ' +
     'group by Col1,Col2 ' +
     'label Col1 \'ID fournisseur\',Col2 \'Fournisseur\',' +
-    'sum(Col6) \'Dépenses nettes\'",' +
+    'sum(Col3) \'Dépenses nettes\'",' +
     '0),' +
     '"select Col1,Col2,Col3 ' +
     'where Col3 <> 0 ' +
@@ -230,25 +230,26 @@ function formuleSommaireRapportFournisseurs_() {
 }
 
 function formuleDetailRapportFournisseurs_() {
-  return '=IFERROR(QUERY(QUERY({' +
+  return '=IFERROR(QUERY(QUERY(FILTER({' +
     'Journal!$O$6:$O,' +
     'Journal!$P$6:$P,' +
-    'Journal!$C$6:$C,' +
     'Journal!$I$6:$I,' +
     'ARRAYFORMULA(TO_TEXT(Journal!$D$6:$D)),' +
     'Journal!$E$6:$E,' +
-    'Journal!$F$6:$F,' +
-    'Journal!$G$6:$G-Journal!$H$6:$H' +
+    'ARRAYFORMULA(Journal!$G$6:$G-Journal!$H$6:$H)' +
     '},' +
-    '"select Col1,Col2,Col4,Col5,Col6,sum(Col8) ' +
-    'where Col1 is not null ' +
-    'and year(Col3) = "&$B$3&" ' +
-    'and Col5 <> \'1000\' ' +
-    'and (Col7 = \'Dépense\' or Col7 = \'Actif\') ' +
-    'group by Col1,Col2,Col4,Col5,Col6 ' +
+    'Journal!$O$6:$O<>"",' +
+    'ARRAYFORMULA(YEAR(Journal!$C$6:$C))=$B$3,' +
+    'ARRAYFORMULA(TO_TEXT(Journal!$D$6:$D))<>"1000",' +
+    'ARRAYFORMULA((' +
+    'Journal!$F$6:$F="Dépense")+(' +
+    'Journal!$F$6:$F="Actif"))' +
+    '),' +
+    '"select Col1,Col2,Col3,Col4,Col5,sum(Col6) ' +
+    'group by Col1,Col2,Col3,Col4,Col5 ' +
     'label Col1 \'ID fournisseur\',Col2 \'Fournisseur\',' +
-    'Col4 \'Programme\',Col5 \'Code compte\',' +
-    'Col6 \'Compte\',sum(Col8) \'Dépenses nettes\'",' +
+    'Col3 \'Programme\',Col4 \'Code compte\',' +
+    'Col5 \'Compte\',sum(Col6) \'Dépenses nettes\'",' +
     '0),' +
     '"select Col1,Col2,Col3,Col4,Col5,Col6 ' +
     'where Col6 <> 0 ' +
