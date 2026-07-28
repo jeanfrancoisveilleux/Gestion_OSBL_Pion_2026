@@ -26,6 +26,10 @@ function onOpen() {
       'Installer Fournisseurs et Contacts',
       'installerGestionFournisseursContacts'
     )
+    .addItem(
+      'Installer le rapport fournisseurs',
+      'installerRapportDepensesFournisseurs'
+    )
     .addSeparator()
     .addItem(
       'Initialiser les dossiers Drive',
@@ -171,7 +175,8 @@ function installerProtectionsDonneesGenerees() {
     'Transactions',
     'Journal',
     'Répartition',
-    'Forfaits'
+    'Forfaits',
+    'Rapport fournisseurs'
   ];
   const prefixeDescription = 'Gestion OSBL – données générées – ';
 
