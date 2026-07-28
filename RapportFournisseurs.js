@@ -209,7 +209,7 @@ function formuleSommaireRapportFournisseurs_() {
     'Journal!$O$6:$O,' +
     'Journal!$P$6:$P,' +
     'Journal!$C$6:$C,' +
-    'Journal!$D$6:$D,' +
+    'ARRAYFORMULA(TO_TEXT(Journal!$D$6:$D)),' +
     'Journal!$F$6:$F,' +
     'Journal!$G$6:$G-Journal!$H$6:$H' +
     '},' +
@@ -235,7 +235,7 @@ function formuleDetailRapportFournisseurs_() {
     'Journal!$P$6:$P,' +
     'Journal!$C$6:$C,' +
     'Journal!$I$6:$I,' +
-    'Journal!$D$6:$D,' +
+    'ARRAYFORMULA(TO_TEXT(Journal!$D$6:$D)),' +
     'Journal!$E$6:$E,' +
     'Journal!$F$6:$F,' +
     'Journal!$G$6:$G-Journal!$H$6:$H' +
