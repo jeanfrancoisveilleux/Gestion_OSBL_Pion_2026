@@ -948,178 +948,66 @@ function installerAutomatisationForfaitsDepuisBanque() {
     throw new Error("L'onglet Import bancaire est introuvable.");
   }
 
-  importBanque.getRange('N5')
-    .setValue('Type de forfait')
-    .setBackground('#f1f3f4')
-    .setFontWeight('bold')
-    .setWrap(true)
-    .setNote(
-      "Choisir un type uniquement lorsqu'un encaissement correspond à un forfait."
-    );
-
-  const validation = SpreadsheetApp.newDataValidation()
-    .requireValueInList([
-      'Forfait Pion joues-tu?',
-      'Forfait Cartier',
-      'Forfait combiné'
-    ], true)
-    .setAllowInvalid(false)
-    .build();
+  // Supprimer le déclencheur onEdit du compte courant (le trigger « Other user »
+  // doit être supprimé manuellement depuis le panneau Apps Script).
+  ScriptApp.getProjectTriggers()
+    .filter(function(declencheur) {
+      return declencheur.getHandlerFunction() ===
+        'creerOuMettreAJourForfaitDepuisBanque';
+    })
+    .forEach(function(declencheur) {
+      ScriptApp.deleteTrigger(declencheur);
+    });
 
   const nombreLignes = importBanque.getMaxRows() - 5;
+  const plageN = importBanque.getRange(6, 14, nombreLignes, 1);
 
-  importBanque.getRange(6, 14, nombreLignes, 1)
-    .setDataValidation(validation)
-    .setBackground('#fff7df');
+  // Retirer la validation de données, la note et la couleur de la colonne N.
+  plageN.clearDataValidations();
+  plageN.clearNote();
+  plageN.setBackground(null);
 
-  importBanque.setColumnWidth(14, 210);
-
-  const declencheurExiste = ScriptApp.getProjectTriggers()
-    .some(declencheur =>
-      declencheur.getHandlerFunction() ===
-      'creerOuMettreAJourForfaitDepuisBanque'
-    );
-
-  if (!declencheurExiste) {
-    ScriptApp.newTrigger('creerOuMettreAJourForfaitDepuisBanque')
-      .forSpreadsheet(classeur)
-      .onEdit()
-      .create();
-  }
-
-  const forfaits = classeur.getSheetByName('Forfaits');
-
-  if (forfaits) {
-    forfaits.getRange('F5').setValue('ID import bancaire');
-  }
-
-  SpreadsheetApp.getUi().alert(
-    "L'automatisation des forfaits est installée."
-  );
-}
-
-
-function creerOuMettreAJourForfaitDepuisBanque(e) {
-  if (!e || !e.range) return;
-
-  const feuille = e.range.getSheet();
-
-  if (
-    feuille.getName() !== 'Import bancaire' ||
-    e.range.getColumn() !== 14 ||
-    e.range.getRow() < 6
-  ) {
-    return;
-  }
-
-  const typeForfait = String(e.value || '').trim();
-
-  const typesPermis = [
+  // Effacer uniquement les cellules contenant une ancienne commande de forfait.
+  const anciensTypes = [
     'Forfait Pion joues-tu?',
     'Forfait Cartier',
     'Forfait combiné'
   ];
 
-  if (!typesPermis.includes(typeForfait)) return;
+  const valeurs = plageN.getValues();
 
-  const ligneBanque = e.range.getRow();
-  const donnees = feuille
-    .getRange(ligneBanque, 1, 1, 14)
-    .getValues()[0];
+  valeurs.forEach(function(ligne, index) {
+    const valeur = String(ligne[0] || '').trim();
 
-  const idImport = String(donnees[0] || '').trim();
-  const dateVente = donnees[1];
-  const description = String(donnees[2] || '');
-  const montant = Number(donnees[3] || 0);
-
-  if (!idImport || !dateVente || montant <= 0) {
-    e.range.clearContent();
-
-    e.source.toast(
-      'Un forfait doit être associé à un encaissement positif.',
-      'Forfait non créé',
-      6
-    );
-
-    return;
-  }
-
-  const forfaits = e.source.getSheetByName('Forfaits');
-
-  if (!forfaits) {
-    throw new Error("L'onglet Forfaits est introuvable.");
-  }
-
-  const nomAcheteur = extraireNomInterac_(description);
-  const saison = dateVente instanceof Date
-    ? dateVente.getFullYear()
-    : new Date(dateVente).getFullYear();
-
-  const derniereLigne = forfaits.getMaxRows();
-  const donneesForfaits = forfaits
-    .getRange(6, 1, derniereLigne - 5, 6)
-    .getValues();
-
-  let ligneForfait = null;
-  let idForfaitExistant = '';
-
-  for (let index = 0; index < donneesForfaits.length; index++) {
-    const idForfait = String(donneesForfaits[index][0] || '').trim();
-    const idBancaire = String(donneesForfaits[index][5] || '').trim();
-
-    if (idBancaire === idImport) {
-      ligneForfait = index + 6;
-      idForfaitExistant = idForfait;
-      break;
+    if (anciensTypes.indexOf(valeur) !== -1) {
+      importBanque.getRange(6 + index, 14).clearContent();
     }
-  }
+  });
 
-  if (!ligneForfait) {
-    const premiereLigneVide = donneesForfaits.findIndex(
-      ligne => !String(ligne[0] || '').trim()
-    );
+  // Renommer l'en-tête et masquer la colonne N.
+  importBanque.getRange('N5')
+    .setValue('Ancien type de forfait (inactif)')
+    .setBackground('#f1f3f4')
+    .setFontWeight('bold')
+    .setWrap(true)
+    .clearNote();
 
-    if (premiereLigneVide < 0) {
-      throw new Error("Aucune ligne libre dans l'onglet Forfaits.");
-    }
+  importBanque.hideColumns(14);
 
-    ligneForfait = premiereLigneVide + 6;
-  }
-
-  const idForfait = idForfaitExistant ||
-    genererProchainIdForfait_(forfaits, saison);
-
-  forfaits.getRange(ligneForfait, 1, 1, 6).setValues([[
-    idForfait,
-    dateVente,
-    nomAcheteur,
-    typeForfait,
-    montant,
-    idImport
-  ]]);
-
-  forfaits.getRange(ligneForfait, 9).setValue('Actif');
-  forfaits.getRange(ligneForfait, 11).setValue(saison);
-
-  // Classement bancaire automatique
-  feuille.getRange(ligneBanque, 8)
-    .setValue('Revenus de laissez-passer et forfaits');
-
-  if (typeForfait === 'Forfait Pion joues-tu?') {
-    feuille.getRange(ligneBanque, 9).setValue('Pion joues-tu?');
-  } else if (typeForfait === 'Forfait Cartier') {
-    feuille.getRange(ligneBanque, 9)
-      .setValue('Pion joues-tu? – Cartier');
-  } else {
-    // Le forfait combiné sera réparti entre les deux projets.
-    feuille.getRange(ligneBanque, 9).clearContent();
-  }
-
-  e.source.toast(
-    idForfait + ' créé automatiquement dans Forfaits.',
-    'Forfait enregistré',
-    5
+  SpreadsheetApp.getUi().alert(
+    'La colonne « Type de forfait » a été désactivée.\n\n' +
+    'Les forfaits sont maintenant sélectionnés directement dans ' +
+    'l’interface « Classer » lors du classement bancaire.'
   );
+}
+
+
+// Compatibilité inactive. L'ancien déclencheur onEdit de cette fonction peut
+// appartenir à un autre utilisateur (« Other user ») et doit être supprimé via
+// installerInterfaceTransactionsMixtes(). Les forfaits sont désormais créés par
+// creerForfaitDepuisRepartitionMixte_ lors du classement bancaire universel.
+function creerOuMettreAJourForfaitDepuisBanque(e) {
+  return;
 }
 
 
@@ -1374,99 +1262,9 @@ function installerModuleRepartition() {
 }
 
 
+// Compatibilité inactive. L'ancien flux de préparation de cinq lignes dans
+// Répartition a été remplacé par l'interface universelle « Classer » (col O).
+// Le déclencheur onEdit associé a été supprimé par installerInterfaceTransactionsMixtes().
 function preparerTransactionMixteDepuisBanque(e) {
-  if (!e || !e.range) return;
-
-  const feuille = e.range.getSheet();
-
-  if (
-    feuille.getName() !== 'Import bancaire' ||
-    e.range.getColumn() !== 15 ||
-    e.range.getRow() < 6 ||
-    String(e.value || '') !== 'Transaction mixte'
-  ) {
-    return;
-  }
-
-  const donnees = feuille
-    .getRange(e.range.getRow(), 1, 1, 15)
-    .getValues()[0];
-
-  const idImport = String(donnees[0] || '').trim();
-  const date = donnees[1];
-  const description = donnees[2];
-  const montant = Number(donnees[3] || 0);
-
-  if (!idImport || montant <= 0) {
-    e.range.clearContent();
-
-    e.source.toast(
-      'La répartition est réservée aux encaissements positifs.',
-      'Transaction non préparée',
-      6
-    );
-
-    return;
-  }
-
-  const repartition = e.source.getSheetByName('Répartition');
-  const nombreLignes = repartition.getMaxRows() - 5;
-
-  const idsExistants = repartition
-    .getRange(6, 1, nombreLignes, 1)
-    .getDisplayValues()
-    .flat();
-
-  if (idsExistants.includes(idImport)) {
-    e.source.toast(
-      'Cette transaction possède déjà une répartition.',
-      'Répartition existante',
-      5
-    );
-
-    return;
-  }
-
-  let ligneDebut = null;
-
-  for (let index = 0; index <= idsExistants.length - 5; index++) {
-    const bloc = idsExistants.slice(index, index + 5);
-
-    if (bloc.every(valeur => !valeur)) {
-      ligneDebut = index + 6;
-      break;
-    }
-  }
-
-  if (!ligneDebut) {
-    throw new Error(
-      "Il n'y a pas cinq lignes libres consécutives dans Répartition."
-    );
-  }
-
-  const lignes = [];
-
-  for (let numero = 1; numero <= 5; numero++) {
-    lignes.push([
-      idImport,
-      date,
-      description,
-      montant,
-      numero
-    ]);
-  }
-
-  repartition
-    .getRange(ligneDebut, 1, 5, 5)
-    .setValues(lignes);
-
-  repartition
-    .getRange(ligneDebut, 7, 5, 1)
-    .setValue(1);
-
-  e.source.toast(
-    'Cinq lignes de répartition ont été préparées.',
-    'Transaction mixte',
-    5
-  );
+  return;
 }

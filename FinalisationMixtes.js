@@ -3,7 +3,8 @@
   const gestionnairesDeclencheurs = [
     'ajouterMenuTransactionsMixtesAuDemarrage',
     'preparerTransactionMixteDepuisBanque',
-    'ouvrirInterfaceMixteDepuisImport'
+    'ouvrirInterfaceMixteDepuisImport',
+    'creerOuMettreAJourForfaitDepuisBanque'
   ];
 
   ScriptApp.getProjectTriggers()
