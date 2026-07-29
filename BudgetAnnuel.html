@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1"
+    >
+    <style>
+      :root {
+        --bleu: #1a73e8;
+        --bleu-fonce: #174ea6;
+        --bleu-pale: #e8f0fe;
+        --gris-050: #f8f9fa;
+        --gris-100: #f1f3f4;
+        --gris-300: #dadce0;
+        --gris-600: #5f6368;
+        --texte: #202124;
+        --vert: #137333;
+        --rouge: #b3261e;
+        --orange: #b06000;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--texte);
+        background: #fff;
+        font-family:
+          Arial,
+          Helvetica,
+          sans-serif;
+      }
+
+      .page {
+        padding: 24px;
+      }
+
+      h1 {
+        margin: 0 0 6px;
+        font-size: 25px;
+      }
+
+      .sous-titre {
+        margin: 0 0 20px;
+        color: var(--gris-600);
+        line-height: 1.4;
+      }
+
+      .message {
+        display: none;
+        margin-bottom: 16px;
+        padding: 12px 14px;
+        border-radius: 8px;
+        font-weight: 600;
+      }
+
+      .message.succes {
+        display: block;
+        color: var(--vert);
+        background: #e6f4ea;
+      }
+
+      .message.erreur {
+        display: block;
+        color: var(--rouge);
+        background: #fce8e6;
+      }
+
+      .carte {
+        margin-bottom: 18px;
+        padding: 18px;
+        border: 1px solid var(--gris-300);
+        border-radius: 12px;
+        background: #fff;
+      }
+
+      .carte h2 {
+        margin: 0 0 15px;
+        font-size: 18px;
+      }
+
+      .grille-formulaire {
+        display: grid;
+        grid-template-columns:
+          minmax(110px, 0.6fr)
+          minmax(220px, 1.4fr)
+          minmax(280px, 1.8fr)
+          minmax(140px, 0.8fr);
+        gap: 14px;
+        align-items: end;
+      }
+
+      .champ {
+        min-width: 0;
+      }
+
+      .champ.notes {
+        grid-column: 1 / -1;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 6px;
+        color: #3c4043;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        min-height: 42px;
+        padding: 9px 11px;
+        border: 1px solid #bdc1c6;
+        border-radius: 7px;
+        color: var(--texte);
+        background: #fff;
+        font: inherit;
+      }
+
+      textarea {
+        min-height: 66px;
+        resize: vertical;
+      }
+
+      input:focus,
+      select:focus,
+      textarea:focus {
+        border-color: var(--bleu);
+        outline: 2px solid rgba(26, 115, 232, 0.18);
+      }
+
+      .actions-formulaire {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 15px;
+      }
+
+      button {
+        min-height: 40px;
+        padding: 8px 16px;
+        border: 1px solid var(--gris-300);
+        border-radius: 7px;
+        color: var(--bleu-fonce);
+        background: #fff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: var(--gris-050);
+      }
+
+      button.principal {
+        border-color: var(--bleu);
+        color: #fff;
+        background: var(--bleu);
+      }
+
+      button.principal:hover {
+        background: var(--bleu-fonce);
+      }
+
+      button.danger {
+        color: var(--rouge);
+      }
+
+      button:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+
+      .resume {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(150px, 1fr));
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .indicateur {
+        padding: 14px;
+        border: 1px solid var(--gris-300);
+        border-radius: 10px;
+        background: var(--gris-050);
+      }
+
+      .indicateur .etiquette {
+        color: var(--gris-600);
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .indicateur .valeur {
+        margin-top: 6px;
+        font-size: 21px;
+        font-weight: 700;
+      }
+
+      .valeur.positive {
+        color: var(--vert);
+      }
+
+      .valeur.negative {
+        color: var(--rouge);
+      }
+
+      .entete-liste {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .entete-liste h2 {
+        margin: 0;
+      }
+
+      .compteur {
+        color: var(--gris-600);
+        font-size: 13px;
+      }
+
+      .tableau-conteneur {
+        overflow-x: auto;
+        border: 1px solid var(--gris-300);
+        border-radius: 10px;
+      }
+
+      table {
+        width: 100%;
+        min-width: 920px;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        padding: 10px 11px;
+        border-bottom: 1px solid var(--gris-300);
+        text-align: left;
+        vertical-align: middle;
+      }
+
+      th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        color: #3c4043;
+        background: var(--gris-100);
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+
+      td.montant,
+      th.montant {
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      td.actions {
+        width: 150px;
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      td.actions button {
+        min-height: 34px;
+        margin-left: 5px;
+        padding: 5px 9px;
+        font-size: 12px;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .type {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .type.revenu {
+        color: var(--vert);
+        background: #e6f4ea;
+      }
+
+      .type.depense {
+        color: var(--orange);
+        background: #fef7e0;
+      }
+
+      .vide {
+        padding: 28px;
+        color: var(--gris-600);
+        text-align: center;
+      }
+
+      .chargement {
+        display: none;
+        margin-left: 8px;
+        color: var(--gris-600);
+        font-size: 13px;
+      }
+
+      .chargement.visible {
+        display: inline;
+      }
+
+      @media (max-width: 760px) {
+        .page {
+          padding: 14px;
+        }
+
+        .grille-formulaire {
+          grid-template-columns: 1fr;
+        }
+
+        .champ.notes {
+          grid-column: auto;
+        }
+
+        .resume {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .actions-formulaire {
+          flex-direction: column-reverse;
+        }
+
+        button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <h1>Budget annuel</h1>
+      <p class="sous-titre">
+        Saisissez un montant prévu par programme et compte.
+        Les montants réels et les écarts sont calculés à partir
+        du Journal.
+      </p>
+
+      <div id="message" class="message"></div>
+
+      <section class="carte">
+        <h2 id="titreFormulaire">Ajouter un budget</h2>
+
+        <div class="grille-formulaire">
+          <div class="champ">
+            <label for="annee">Année</label>
+            <input
+              id="annee"
+              type="number"
+              min="2000"
+              max="2100"
+              step="1"
+            >
+          </div>
+
+          <div class="champ">
+            <label for="programme">Programme</label>
+            <select id="programme"></select>
+          </div>
+
+          <div class="champ">
+            <label for="compte">Compte comptable</label>
+            <select id="compte"></select>
+          </div>
+
+          <div class="champ">
+            <label for="montant">Budget prévu</label>
+            <input
+              id="montant"
+              type="number"
+              min="0"
+              step="0.01"
+              inputmode="decimal"
+            >
+          </div>
+
+          <div class="champ notes">
+            <label for="notes">Notes facultatives</label>
+            <textarea
+              id="notes"
+              maxlength="500"
+              placeholder="Hypothèse, source du montant, précision..."
+            ></textarea>
+          </div>
+        </div>
+
+        <div class="actions-formulaire">
+          <button
+            id="annulerModification"
+            type="button"
+            hidden
+          >
+            Annuler la modification
+          </button>
+          <button
+            id="enregistrer"
+            class="principal"
+            type="button"
+          >
+            Enregistrer
+          </button>
+          <span id="chargement" class="chargement">
+            Traitement en cours…
+          </span>
+        </div>
+      </section>
+
+      <section id="resume" class="resume"></section>
+
+      <section class="carte">
+        <div class="entete-liste">
+          <h2>Budget actif pour l’année sélectionnée</h2>
+          <span id="compteur" class="compteur"></span>
+        </div>
+
+        <div class="tableau-conteneur">
+          <table>
+            <thead>
+              <tr>
+                <th>Programme</th>
+                <th>Compte</th>
+                <th>Type</th>
+                <th class="montant">Budget</th>
+                <th class="montant">Réel</th>
+                <th class="montant">Écart favorable</th>
+                <th class="montant">% utilisé</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="corpsTableau"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const DONNEES_INITIALES =
+        <?!= JSON.stringify(DONNEES_INITIALES) ?>;
+
+      let etat = DONNEES_INITIALES;
+      let numeroLigneEnModification = 0;
+
+      const formatMonetaire = new Intl.NumberFormat(
+        'fr-CA',
+        {
+          style: 'currency',
+          currency: 'CAD'
+        }
+      );
+
+      const formatPourcentage = new Intl.NumberFormat(
+        'fr-CA',
+        {
+          style: 'percent',
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1
+        }
+      );
+
+      const elements = {
+        annee: document.getElementById('annee'),
+        programme: document.getElementById('programme'),
+        compte: document.getElementById('compte'),
+        montant: document.getElementById('montant'),
+        notes: document.getElementById('notes'),
+        enregistrer: document.getElementById('enregistrer'),
+        annulerModification:
+          document.getElementById('annulerModification'),
+        titreFormulaire:
+          document.getElementById('titreFormulaire'),
+        chargement: document.getElementById('chargement'),
+        message: document.getElementById('message'),
+        resume: document.getElementById('resume'),
+        compteur: document.getElementById('compteur'),
+        corpsTableau:
+          document.getElementById('corpsTableau')
+      };
+
+      function initialiser() {
+        remplirProgrammes();
+        remplirComptes();
+        elements.annee.value = etat.anneeDefaut;
+        reinitialiserFormulaire(false);
+        afficherDonnees();
+
+        elements.enregistrer.addEventListener(
+          'click',
+          enregistrerBudget
+        );
+
+        elements.annulerModification.addEventListener(
+          'click',
+          function() {
+            reinitialiserFormulaire(true);
+          }
+        );
+
+        elements.annee.addEventListener(
+          'change',
+          afficherDonnees
+        );
+      }
+
+      function remplirProgrammes() {
+        elements.programme.textContent = '';
+        ajouterOption(
+          elements.programme,
+          '',
+          'Sélectionner un programme…'
+        );
+
+        etat.programmes.forEach(function(programme) {
+          ajouterOption(
+            elements.programme,
+            programme,
+            programme
+          );
+        });
+      }
+
+      function remplirComptes() {
+        elements.compte.textContent = '';
+        ajouterOption(
+          elements.compte,
+          '',
+          'Sélectionner un compte…'
+        );
+
+        ['Revenu', 'Dépense'].forEach(function(type) {
+          const groupe = document.createElement('optgroup');
+          groupe.label =
+            type === 'Revenu' ? 'Revenus' : 'Dépenses';
+
+          etat.comptes
+            .filter(function(compte) {
+              return compte.type === type;
+            })
+            .forEach(function(compte) {
+              const option = document.createElement('option');
+              option.value = compte.code;
+              option.textContent =
+                compte.code + ' — ' + compte.nom;
+              groupe.appendChild(option);
+            });
+
+          elements.compte.appendChild(groupe);
+        });
+      }
+
+      function ajouterOption(select, valeur, libelle) {
+        const option = document.createElement('option');
+        option.value = valeur;
+        option.textContent = libelle;
+        select.appendChild(option);
+      }
+
+      function afficherDonnees() {
+        const annee = Number(elements.annee.value || 0);
+        const lignes = etat.lignes.filter(function(ligne) {
+          return ligne.annee === annee;
+        });
+
+        afficherResume(lignes);
+        afficherTableau(lignes);
+      }
+
+      function afficherResume(lignes) {
+        const totaux = lignes.reduce(
+          function(accumulateur, ligne) {
+            if (ligne.type === 'Revenu') {
+              accumulateur.budgetRevenus += ligne.budget;
+              accumulateur.reelRevenus += ligne.reel;
+            } else if (ligne.type === 'Dépense') {
+              accumulateur.budgetDepenses += ligne.budget;
+              accumulateur.reelDepenses += ligne.reel;
+            }
+
+            return accumulateur;
+          },
+          {
+            budgetRevenus: 0,
+            reelRevenus: 0,
+            budgetDepenses: 0,
+            reelDepenses: 0
+          }
+        );
+
+        const resultatPrevu =
+          totaux.budgetRevenus - totaux.budgetDepenses;
+        const resultatReel =
+          totaux.reelRevenus - totaux.reelDepenses;
+
+        elements.resume.textContent = '';
+        elements.resume.appendChild(
+          creerIndicateur(
+            'Budget revenus',
+            totaux.budgetRevenus
+          )
+        );
+        elements.resume.appendChild(
+          creerIndicateur(
+            'Budget dépenses',
+            totaux.budgetDepenses
+          )
+        );
+        elements.resume.appendChild(
+          creerIndicateur(
+            'Résultat prévu',
+            resultatPrevu,
+            true
+          )
+        );
+        elements.resume.appendChild(
+          creerIndicateur(
+            'Résultat réel',
+            resultatReel,
+            true
+          )
+        );
+      }
+
+      function creerIndicateur(
+        etiquette,
+        valeur,
+        colorer
+      ) {
+        const conteneur = document.createElement('div');
+        conteneur.className = 'indicateur';
+
+        const etiquetteElement =
+          document.createElement('div');
+        etiquetteElement.className = 'etiquette';
+        etiquetteElement.textContent = etiquette;
+
+        const valeurElement = document.createElement('div');
+        valeurElement.className = 'valeur';
+        valeurElement.textContent =
+          formatMonetaire.format(valeur || 0);
+
+        if (colorer) {
+          valeurElement.classList.add(
+            valeur >= 0 ? 'positive' : 'negative'
+          );
+        }
+
+        conteneur.appendChild(etiquetteElement);
+        conteneur.appendChild(valeurElement);
+        return conteneur;
+      }
+
+      function afficherTableau(lignes) {
+        elements.corpsTableau.textContent = '';
+        elements.compteur.textContent =
+          lignes.length +
+          (lignes.length > 1 ? ' lignes' : ' ligne');
+
+        if (!lignes.length) {
+          const ligneVide = document.createElement('tr');
+          const celluleVide = document.createElement('td');
+          celluleVide.colSpan = 8;
+          celluleVide.className = 'vide';
+          celluleVide.textContent =
+            'Aucun budget annuel actif pour cette année.';
+          ligneVide.appendChild(celluleVide);
+          elements.corpsTableau.appendChild(ligneVide);
+          return;
+        }
+
+        lignes.forEach(function(ligne) {
+          const tr = document.createElement('tr');
+
+          ajouterCellule(tr, ligne.programme);
+          ajouterCellule(
+            tr,
+            ligne.codeCompte + ' — ' + ligne.nomCompte
+          );
+
+          const celluleType = document.createElement('td');
+          const pastille = document.createElement('span');
+          pastille.className =
+            'type ' +
+            (ligne.type === 'Revenu'
+              ? 'revenu'
+              : 'depense');
+          pastille.textContent = ligne.type;
+          celluleType.appendChild(pastille);
+          tr.appendChild(celluleType);
+
+          ajouterCelluleMontant(tr, ligne.budget);
+          ajouterCelluleMontant(tr, ligne.reel);
+          ajouterCelluleMontant(
+            tr,
+            ligne.ecart,
+            true
+          );
+
+          const cellulePourcentage =
+            document.createElement('td');
+          cellulePourcentage.className = 'montant';
+          cellulePourcentage.textContent =
+            ligne.budget > 0
+              ? formatPourcentage.format(
+                  ligne.pourcentage || 0
+                )
+              : '—';
+          tr.appendChild(cellulePourcentage);
+
+          const celluleActions =
+            document.createElement('td');
+          celluleActions.className = 'actions';
+
+          const boutonModifier =
+            document.createElement('button');
+          boutonModifier.type = 'button';
+          boutonModifier.textContent = 'Modifier';
+          boutonModifier.addEventListener(
+            'click',
+            function() {
+              modifierLigne(ligne);
+            }
+          );
+
+          const boutonDesactiver =
+            document.createElement('button');
+          boutonDesactiver.type = 'button';
+          boutonDesactiver.className = 'danger';
+          boutonDesactiver.textContent = 'Désactiver';
+          boutonDesactiver.addEventListener(
+            'click',
+            function() {
+              confirmerDesactivation(ligne);
+            }
+          );
+
+          celluleActions.appendChild(boutonModifier);
+          celluleActions.appendChild(boutonDesactiver);
+          tr.appendChild(celluleActions);
+          elements.corpsTableau.appendChild(tr);
+        });
+      }
+
+      function ajouterCellule(tr, texte) {
+        const td = document.createElement('td');
+        td.textContent = texte || '';
+        tr.appendChild(td);
+      }
+
+      function ajouterCelluleMontant(
+        tr,
+        valeur,
+        colorer
+      ) {
+        const td = document.createElement('td');
+        td.className = 'montant';
+        td.textContent = formatMonetaire.format(valeur || 0);
+
+        if (colorer) {
+          td.style.color =
+            valeur >= 0 ? 'var(--vert)' : 'var(--rouge)';
+          td.style.fontWeight = '700';
+        }
+
+        tr.appendChild(td);
+      }
+
+      function modifierLigne(ligne) {
+        numeroLigneEnModification = ligne.numeroLigne;
+        elements.annee.value = ligne.annee;
+        elements.programme.value = ligne.programme;
+        elements.compte.value = ligne.codeCompte;
+        elements.montant.value = ligne.budget.toFixed(2);
+        elements.notes.value = ligne.notes || '';
+        elements.titreFormulaire.textContent =
+          'Modifier un budget';
+        elements.annulerModification.hidden = false;
+        afficherMessage('', '');
+        window.scrollTo({
+          top: 0,
+          behavior: 'smooth'
+        });
+      }
+
+      function reinitialiserFormulaire(
+        conserverAnnee
+      ) {
+        const anneeCourante =
+          Number(elements.annee.value || 0) ||
+          etat.anneeDefaut;
+
+        numeroLigneEnModification = 0;
+        elements.annee.value = conserverAnnee
+          ? anneeCourante
+          : etat.anneeDefaut;
+        elements.programme.value = '';
+        elements.compte.value = '';
+        elements.montant.value = '';
+        elements.notes.value = '';
+        elements.titreFormulaire.textContent =
+          'Ajouter un budget';
+        elements.annulerModification.hidden = true;
+      }
+
+      function enregistrerBudget() {
+        afficherMessage('', '');
+
+        const donnees = {
+          numeroLigne: numeroLigneEnModification,
+          annee: Number(elements.annee.value || 0),
+          programme: elements.programme.value,
+          codeCompte: elements.compte.value,
+          montant: Number(elements.montant.value),
+          notes: elements.notes.value
+        };
+
+        if (
+          !donnees.annee ||
+          !donnees.programme ||
+          !donnees.codeCompte ||
+          !Number.isFinite(donnees.montant) ||
+          donnees.montant < 0
+        ) {
+          afficherMessage(
+            'Remplissez l’année, le programme, le compte ' +
+              'et un montant valide.',
+            'erreur'
+          );
+          return;
+        }
+
+        definirChargement(true);
+
+        google.script.run
+          .withSuccessHandler(function(resultat) {
+            etat = resultat.donnees;
+            remplirProgrammes();
+            remplirComptes();
+            elements.annee.value = donnees.annee;
+            reinitialiserFormulaire(true);
+            afficherDonnees();
+            afficherMessage(resultat.message, 'succes');
+            definirChargement(false);
+          })
+          .withFailureHandler(function(erreur) {
+            afficherMessage(
+              obtenirMessageErreur(erreur),
+              'erreur'
+            );
+            definirChargement(false);
+          })
+          .enregistrerBudgetAnnuel(donnees);
+      }
+
+      function confirmerDesactivation(ligne) {
+        const message =
+          'Désactiver le budget ' +
+          ligne.codeCompte +
+          ' — ' +
+          ligne.nomCompte +
+          ' pour ' +
+          ligne.programme +
+          '?\n\n' +
+          'La ligne restera dans le classeur, mais ne sera ' +
+          'plus incluse dans les rapports.';
+
+        if (!window.confirm(message)) {
+          return;
+        }
+
+        definirChargement(true);
+
+        google.script.run
+          .withSuccessHandler(function(resultat) {
+            etat = resultat.donnees;
+            reinitialiserFormulaire(true);
+            afficherDonnees();
+            afficherMessage(resultat.message, 'succes');
+            definirChargement(false);
+          })
+          .withFailureHandler(function(erreur) {
+            afficherMessage(
+              obtenirMessageErreur(erreur),
+              'erreur'
+            );
+            definirChargement(false);
+          })
+          .desactiverBudgetAnnuel(ligne.numeroLigne);
+      }
+
+      function definirChargement(actif) {
+        elements.enregistrer.disabled = actif;
+        elements.annulerModification.disabled = actif;
+        elements.chargement.classList.toggle(
+          'visible',
+          actif
+        );
+      }
+
+      function afficherMessage(texte, type) {
+        elements.message.textContent = texte || '';
+        elements.message.className = 'message';
+
+        if (texte && type) {
+          elements.message.classList.add(type);
+        }
+      }
+
+      function obtenirMessageErreur(erreur) {
+        if (!erreur) {
+          return 'Une erreur inconnue est survenue.';
+        }
+
+        return (
+          erreur.message ||
+          erreur.toString() ||
+          'Une erreur inconnue est survenue.'
+        );
+      }
+
+      initialiser();
+    </script>
+  </body>
+</html>
