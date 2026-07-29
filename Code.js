@@ -1321,15 +1321,15 @@ function installerModuleRepartition() {
     repartition.getRange('A5:P1000').createFilter();
   }
 
-  // Choix permettant de préparer une transaction mixte
+  // Colonne Action : déclencheur du classement bancaire universel
   importBanque.getRange('O5')
-    .setValue('Mode de traitement')
+    .setValue('Action')
     .setBackground('#f1f3f4')
     .setFontWeight('bold')
     .setWrap(true);
 
   const validationMode = SpreadsheetApp.newDataValidation()
-    .requireValueInList(['Transaction mixte'], true)
+    .requireValueInList(['Classer'], true)
     .setAllowInvalid(false)
     .build();
 
@@ -1339,12 +1339,37 @@ function installerModuleRepartition() {
     .setDataValidation(validationMode)
     .setBackground('#fff7df');
 
-  importBanque.setColumnWidth(15, 150);
+  importBanque.setColumnWidth(15, 100);
+
+  // Migrer et nettoyer la colonne Action :
+  // - vider l'ancienne valeur 'Transaction mixte' sur toutes les lignes (migration);
+  // - ne jamais la réécrire par script, car seul un clic utilisateur declenche l'interface;
+  // - vider 'Classer' uniquement sur les lignes deja classees;
+  // - laisser 'Classer' intact sur les lignes encore a classer.
+  const derniereLigneImport = importBanque.getLastRow();
+  if (derniereLigneImport >= 6) {
+    const nombreLignesData = derniereLigneImport - 5;
+    const colonnesKO = importBanque
+      .getRange(6, 11, nombreLignesData, 5)
+      .getValues();
+    colonnesKO.forEach(function(ligne, index) {
+      const statut = String(ligne[0] || '').trim();
+      const action = String(ligne[4] || '').trim();
+      if (
+        action === 'Transaction mixte' ||
+        (statut === 'Classée' && action === 'Classer')
+      ) {
+        importBanque.getRange(6 + index, 15).clearContent();
+      }
+    });
+  }
 
   installerInterfaceTransactionsMixtes();
 
   SpreadsheetApp.getUi().alert(
-    'Le module de répartition est installé.'
+    'Le module de classement bancaire est installé.\n\n' +
+    'Choisissez « Classer » dans la colonne « Action » de l’onglet ' +
+    '« Import bancaire » pour classer une transaction.'
   );
 }
 

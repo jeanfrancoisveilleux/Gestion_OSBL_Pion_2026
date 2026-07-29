@@ -1,4 +1,4 @@
-function installerInterfaceTransactionsMixtes() {
+﻿function installerInterfaceTransactionsMixtes() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const gestionnairesDeclencheurs = [
     'ajouterMenuTransactionsMixtesAuDemarrage',
@@ -29,18 +29,18 @@ function installerInterfaceTransactionsMixtes() {
   ajouterMenuTransactionsMixtesAuDemarrage();
 
   SpreadsheetApp.getUi().alert(
-    'L’interface de répartition est installée.\n\n' +
-    'Dès que vous choisissez « Transaction mixte » dans la colonne ' +
-    '« Mode de traitement » de l’onglet « Import bancaire », la fenêtre ' +
-    'de répartition s’ouvre sans créer de ligne à l’avance.'
+    'L’interface de classement bancaire est installée.\n\n' +
+    'Dès que vous choisissez « Classer » dans la colonne ' +
+    '« Action » de l’onglet « Import bancaire », la fenêtre ' +
+    'de classement s’ouvre automatiquement.'
   );
 }
 
 function ajouterMenuTransactionsMixtesAuDemarrage() {
   SpreadsheetApp.getUi()
-    .createMenu('Répartition')
+    .createMenu('Classement bancaire')
     .addItem(
-      'Répartir la transaction sélectionnée',
+      'Classer la transaction sélectionnée',
       'ouvrirRepartitionTransactionSelectionnee'
     )
     .addItem(
@@ -736,22 +736,27 @@ function ouvrirInterfaceMixteDepuisImport(e) {
     plage.getColumn() !== 15 ||
     plage.getNumRows() !== 1 ||
     plage.getNumColumns() !== 1 ||
-    String(e.value || '').trim() !== 'Transaction mixte'
+    String(e.value || '').trim() !== 'Classer'
   ) {
     return;
   }
 
   try {
     ouvrirRepartitionPourLigneMixte_(plage.getRow());
+    plage.clearContent();
   } catch (erreur) {
+    try {
+      plage.clearContent();
+    } catch (ignore) {}
+
     const message = erreur && erreur.message
       ? erreur.message
       : String(erreur);
 
     (e.source || SpreadsheetApp.getActiveSpreadsheet()).toast(
       message +
-      ' Utilisez le menu « Répartition » si la fenêtre ne s’est pas ouverte.',
-      'Répartition',
+      ' Utilisez le menu « Classement bancaire » si la fenêtre ne s’est pas ouverte.',
+      'Classement bancaire',
       10
     );
   }
@@ -769,7 +774,7 @@ function ouvrirRepartitionPourLigneMixte_(ligneImport) {
     modele.evaluate()
       .setWidth(840)
       .setHeight(610),
-    'Répartir une transaction bancaire'
+    'Classer une transaction bancaire'
   );
 }
 
@@ -806,7 +811,7 @@ function ouvrirRepartitionPourRevisionTransaction_(
     modele.evaluate()
       .setWidth(840)
       .setHeight(610),
-    'Modifier la répartition'
+    'Modifier la transaction'
   );
 }
 
@@ -918,15 +923,15 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
           compte: regle ? (regle.codeCompte || '') : '',
           programme: regle ? (regle.programme || '') : '',
           projet: '',
-          montant: 0
+          montant: arrondirMontantMixte_(Math.abs(montant))
         }];
 
     return {
       typeMouvement: 'depense',
       mode: modeRevision ? 'revision' : 'creation',
       titre: modeRevision
-        ? 'Modifier la répartition'
-        : 'Répartir une dépense bancaire',
+        ? 'Modifier la transaction'
+        : 'Classer une dépense bancaire',
       boutonPrincipal: modeRevision
         ? 'Enregistrer la révision'
         : 'Enregistrer et comptabiliser',
@@ -996,7 +1001,7 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
   const descriptionBancaireMixte = String(valeurs[2] || '').trim();
   const titreBase = {
     mode: modeRevision ? 'revision' : 'creation',
-    titre: modeRevision ? 'Modifier la répartition' : 'Répartir la transaction',
+    titre: modeRevision ? 'Modifier la transaction' : 'Classer la transaction',
     boutonPrincipal: modeRevision
       ? 'Enregistrer la révision'
       : 'Enregistrer et comptabiliser',
@@ -1660,7 +1665,7 @@ function importBancaireModeMixte_(idImport) {
   const ligne = trouverLigneParValeurMixte_(feuille, 1, idImport, 6);
 
   if (ligne) {
-    feuille.getRange(ligne, 15).setValue('Transaction mixte');
+    feuille.getRange(ligne, 15).setValue('Classer');
   }
 }
 
@@ -1905,6 +1910,7 @@ function finaliserTransactionMixteParId_(idImport, options) {
   importBancaire.getRange(ligneImport, 10).setValue(idGroupe);
   importBancaire.getRange(ligneImport, 11).setValue('Classée');
   importBancaire.getRange(ligneImport, 13).setValue(nouvelleNote);
+  importBancaire.getRange(ligneImport, 15).clearContent();
 
   if (idRevisionSource) {
     transactionsCreees.forEach(function(item) {
@@ -3586,6 +3592,7 @@ function finaliserDepenseMixteParId_(idImport, options) {
   importBancaire.getRange(ligneImport, 10).setValue(idGroupe);
   importBancaire.getRange(ligneImport, 11).setValue('Classée');
   importBancaire.getRange(ligneImport, 13).setValue(nouvelleNote);
+  importBancaire.getRange(ligneImport, 15).clearContent();
 
   // Retirer la validation de P:S sur cette ligne (protection contre la validation héritée de O)
   importBancaire.getRange(ligneImport, 16, 1, 4).clearDataValidations();
@@ -4561,6 +4568,7 @@ function finaliserRevenuDirectMixteParId_(idImport, options) {
   importBancaire.getRange(ligneImport, 10).setValue(idGroupe);
   importBancaire.getRange(ligneImport, 11).setValue('Classée');
   importBancaire.getRange(ligneImport, 13).setValue(nouvelleNote);
+  importBancaire.getRange(ligneImport, 15).clearContent();
   importBancaire.getRange(ligneImport, 16, 1, 4).clearDataValidations();
 
   if (idRevisionSource) {
