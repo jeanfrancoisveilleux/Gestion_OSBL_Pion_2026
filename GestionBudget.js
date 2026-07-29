@@ -879,9 +879,9 @@ function construireFormulesBudgetAnnuel_(ligne) {
     '),1),1))';
 
   const criteres =
-    ',Journal!$B$6:$B,">="&' +
+    ',Journal!$C$6:$C,">="&' +
     debutPeriode +
-    ',Journal!$B$6:$B,"<"&' +
+    ',Journal!$C$6:$C,"<"&' +
     finPeriode +
     ',Journal!$D$6:$D,$D' +
     ligne +
