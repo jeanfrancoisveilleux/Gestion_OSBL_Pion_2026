@@ -359,7 +359,24 @@ function appliquerReglesBancairesImport_(feuille, ligneDepart, nombreLignes, cla
       ? (dictos.contacts[suggestion.idContact] || '')
       : '';
 
-    outputHI[i] = [suggestion.codeCompte || '', suggestion.programme || ''];
+    // Résoudre le NOM du compte (H attend le nom, pas le code)
+    let nomCompte = '';
+    if (suggestion.codeCompte) {
+      const nomTrouve = dictos.comptes[suggestion.codeCompte];
+      if (nomTrouve === undefined) {
+        // Code inconnu → conflit explicite, ne pas écrire de valeur invalide dans H
+        conflits.push({
+          ligne: ligneDepart + i,
+          description: description,
+          message: 'Code comptable « ' + suggestion.codeCompte +
+                   ' » introuvable dans Configuration — suggestion H ignorée'
+        });
+        continue;
+      }
+      nomCompte = nomTrouve;
+    }
+
+    outputHI[i] = [nomCompte, suggestion.programme || ''];
     outputPW[i] = [
       suggestion.idFournisseur  || '',
       nomFournisseur,

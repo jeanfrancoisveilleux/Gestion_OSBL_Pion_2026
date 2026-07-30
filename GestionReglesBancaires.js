@@ -184,10 +184,30 @@ function reappliquerReglesBancairesAuxTransactionsAClasser() {
           ? (dictos.contacts[suggestion.idContact] || '')
           : '';
 
-        // H:I — setNumberFormat('@') avant setValues
+        // Résoudre le NOM du compte (H attend le nom, pas le code)
+        let nomCompte = '';
+        if (suggestion.codeCompte) {
+          const nomTrouve = dictos.comptes[suggestion.codeCompte];
+          if (nomTrouve === undefined) {
+            // Code inconnu → conflit explicite, ne pas écrire de valeur invalide
+            estConflit = true;
+            conflits.push({
+              ligne: ligneSheet,
+              description: description,
+              message: 'Code comptable « ' + suggestion.codeCompte +
+                       ' » introuvable dans Configuration — suggestion H ignorée'
+            });
+            feuille.getRange(ligneSheet, 8, 1, 2).clearContent();
+            feuille.getRange(ligneSheet, 16, 1, 8).clearContent();
+            continue;
+          }
+          nomCompte = nomTrouve;
+        }
+
+        // H:I — setNumberFormat('@') avant setValues ; H reçoit le NOM du compte
         feuille.getRange(ligneSheet, 8, 1, 2)
           .setNumberFormat('@')
-          .setValues([[suggestion.codeCompte || '', suggestion.programme || '']]);
+          .setValues([[nomCompte, suggestion.programme || '']]);
 
         // P:W — setNumberFormat('@') avant setValues
         feuille.getRange(ligneSheet, 16, 1, 8)
@@ -1004,6 +1024,7 @@ function verifierIntegriteIdsRegles_(feuille) {
 function chargerDictionnairesNoms_(ss) {
   const fournisseurs = {};
   const contacts = {};
+  const comptes = {};
 
   const feuilleFournisseurs = ss.getSheetByName('Fournisseurs');
   if (feuilleFournisseurs && feuilleFournisseurs.getLastRow() >= 6) {
@@ -1027,7 +1048,21 @@ function chargerDictionnairesNoms_(ss) {
       });
   }
 
-  return { fournisseurs: fournisseurs, contacts: contacts };
+  // Configuration col A = code comptable, col B = nom, col E = 'Oui' si actif
+  const feuilleConfig = ss.getSheetByName('Configuration');
+  if (feuilleConfig && feuilleConfig.getLastRow() >= 6) {
+    feuilleConfig
+      .getRange(6, 1, feuilleConfig.getLastRow() - 5, 5)
+      .getDisplayValues()
+      .forEach(function(l) {
+        const code = String(l[0] || '').trim();
+        const nom  = String(l[1] || '').trim();
+        const actif = String(l[4] || '').trim();
+        if (code && actif === 'Oui') comptes[code] = nom;
+      });
+  }
+
+  return { fournisseurs: fournisseurs, contacts: contacts, comptes: comptes };
 }
 
 function preparerColonnesExtenduesImportBancaire_(ss) {
