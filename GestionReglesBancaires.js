@@ -47,6 +47,7 @@ function installerReglesBancairesConfigurables() {
     const feuille = preparerOngletReglesBancaires_(ss);
     const nombreMigrees = migrerReglesBancairesDepuisConfig_(ss, feuille);
     const nombreIdentifies = attribuerIdsReglesBancaires_(feuille);
+    verifierIntegriteIdsRegles_(feuille);
 
     SpreadsheetApp.getUi().alert(
       'Module de règles bancaires installé.\n\n' +
@@ -696,10 +697,16 @@ function attribuerIdsReglesBancaires_(feuille) {
   }
 
   const nbLignes = derniereLigne - C.ligneEntetes;
+
+  if (nbLignes <= 0) {
+    return 0;
+  }
+
   const colonnesIDTexte = feuille
     .getRange(C.premiereLigne, 1, nbLignes, C.COL_TEXTE)
     .getDisplayValues();
 
+  // Passe 1 : déterminer le numéro maximum déjà attribué
   let numeroMax = 0;
   colonnesIDTexte.forEach(function(ligne) {
     const id = String(ligne[C.COL_ID - 1] || '').trim();
@@ -709,22 +716,111 @@ function attribuerIdsReglesBancaires_(feuille) {
     }
   });
 
+  // Passe 2 : identifier les lignes sans ID ayant un texte à reconnaître
+  const aEcrire = [];
+  colonnesIDTexte.forEach(function(ligne, i) {
+    const id = String(ligne[C.COL_ID - 1] || '').trim();
+    const texte = String(ligne[C.COL_TEXTE - 1] || '').trim();
+    if (!id && texte) {
+      numeroMax += 1;
+      aEcrire.push({
+        ligneSheet: C.premiereLigne + i,
+        id: 'REG-' + String(numeroMax).padStart(4, '0')
+      });
+    }
+  });
+
+  if (aEcrire.length === 0) {
+    return 0;
+  }
+
+  // Écriture : setNumberFormat('@') AVANT setValue pour garantir le stockage en texte
+  aEcrire.forEach(function(item) {
+    feuille.getRange(item.ligneSheet, C.COL_ID)
+      .setNumberFormat('@')
+      .setValue(item.id);
+  });
+
+  SpreadsheetApp.flush();
+
+  // Relecture groupée pour confirmer la persistance de chaque identifiant
+  const minLigne = aEcrire[0].ligneSheet;
+  const maxLigne = aEcrire[aEcrire.length - 1].ligneSheet;
+  const relues = feuille
+    .getRange(minLigne, C.COL_ID, maxLigne - minLigne + 1, 1)
+    .getDisplayValues();
+
   let nombreAttribues = 0;
+  const echecEcritures = [];
+
+  aEcrire.forEach(function(item) {
+    const valeur = String(relues[item.ligneSheet - minLigne][0] || '').trim();
+    if (valeur === item.id) {
+      nombreAttribues += 1;
+    } else {
+      echecEcritures.push(
+        'Ligne ' + item.ligneSheet + ' : attendu « ' + item.id + ' », lu « ' + valeur + ' ».'
+      );
+    }
+  });
+
+  if (echecEcritures.length > 0) {
+    throw new Error(
+      'Échec d\'écriture des identifiants dans la colonne A (' +
+      echecEcritures.length + ' cellule(s)) :\n' +
+      echecEcritures.join('\n')
+    );
+  }
+
+  return nombreAttribues;
+}
+
+function verifierIntegriteIdsRegles_(feuille) {
+  const C = CONFIG_REGLES_BANCAIRES_;
+  const derniereLigne = feuille.getLastRow();
+
+  if (derniereLigne < C.premiereLigne) {
+    return;
+  }
+
+  const nbLignes = derniereLigne - C.ligneEntetes;
+
+  if (nbLignes <= 0) {
+    return;
+  }
+
+  const colonnesIDTexte = feuille
+    .getRange(C.premiereLigne, 1, nbLignes, C.COL_TEXTE)
+    .getDisplayValues();
+
+  const erreurs = [];
+  const idsVus = new Set();
 
   colonnesIDTexte.forEach(function(ligne, i) {
     const id = String(ligne[C.COL_ID - 1] || '').trim();
     const texte = String(ligne[C.COL_TEXTE - 1] || '').trim();
 
-    if (!id && texte) {
-      numeroMax += 1;
-      const nouvelId = 'REG-' + String(numeroMax).padStart(4, '0');
-      feuille
-        .getRange(C.premiereLigne + i, C.COL_ID)
-        .setValue(nouvelId)
-        .setNumberFormat('@');
-      nombreAttribues += 1;
+    if (!texte) {
+      return;
+    }
+
+    if (!id) {
+      erreurs.push(
+        'Ligne ' + (C.premiereLigne + i) + ' : texte présent mais identifiant manquant en colonne A.'
+      );
+    } else if (idsVus.has(id)) {
+      erreurs.push(
+        'Ligne ' + (C.premiereLigne + i) + ' : identifiant « ' + id + ' » en doublon.'
+      );
+    } else {
+      idsVus.add(id);
     }
   });
 
-  return nombreAttribues;
+  if (erreurs.length > 0) {
+    throw new Error(
+      'Intégrité des identifiants compromise (' + erreurs.length + ' problème(s)) :\n' +
+      erreurs.join('\n')
+    );
+  }
 }
