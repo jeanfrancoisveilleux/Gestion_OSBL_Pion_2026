@@ -60,6 +60,18 @@ function onOpen() {
       'Vérifier le système',
       'verifierSysteme'
     )
+    .addSeparator()
+    .addSubMenu(
+      SpreadsheetApp.getUi().createMenu('Maintenance')
+        .addItem(
+          'Auditer la remise à zéro des tests',
+          'auditerReinitialisationDonneesTests'
+        )
+        .addItem(
+          'Réinitialiser les données de test',
+          'reinitialiserDonneesTests'
+        )
+    )
     .addToUi();
 }
 
