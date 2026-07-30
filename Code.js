@@ -40,6 +40,14 @@ function onOpen() {
       'installerReglesBancairesConfigurables'
     )
     .addItem(
+      'Valider les règles bancaires',
+      'validerReglesBancairesConfigurables'
+    )
+    .addItem(
+      'Réappliquer les règles aux transactions à classer',
+      'reappliquerReglesBancairesAuxTransactionsAClasser'
+    )
+    .addItem(
       'Installer le rapport fournisseurs',
       'installerRapportDepensesFournisseurs'
     )

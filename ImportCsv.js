@@ -194,13 +194,21 @@ function importerCsvDesjardins(contenu, nomFichier) {
     )
     .setNumberFormat('yyyy-mm-dd hh:mm');
 
-  // Appliquer les règles bancaires aux nouvelles lignes (colonnes P:S)
-  appliquerReglesBancairesImport_(
+  // Appliquer les règles bancaires configurables aux nouvelles lignes (H:I et P:W)
+  const resultRegles = appliquerReglesBancairesImport_(
     feuille,
     ligneDepart,
     nouvellesLignes.length,
     classeur
   );
+
+  if (resultRegles.avertissement) {
+    SpreadsheetApp.getActive().toast(
+      resultRegles.avertissement.slice(0, 250),
+      'Règles bancaires',
+      15
+    );
+  }
 
   const premiereTransaction = nouvellesLignes[0];
   const derniereTransaction =
@@ -233,7 +241,9 @@ function importerCsvDesjardins(contenu, nomFichier) {
     totalDepots: totalDepots,
     soldeInitial: soldeInitialCalcule,
     soldeFinal: derniereTransaction[4],
-    ecartOuverture: ecartOuverture
+    ecartOuverture: ecartOuverture,
+    avertissementRegles: resultRegles.avertissement || null,
+    conflitsRegles: resultRegles.conflits || []
   };
 }
 
@@ -260,41 +270,135 @@ function calculerEmpreinte_(texte) {
     .join('');
 }
 
-// Applique les règles bancaires aux nouvelles lignes importées (suggestions P:S).
-// Ne modifie pas les colonnes H, I ni les lignes déjà comptabilisées.
-// Ne fait jamais échouer l'import si les onglets ou la zone T:Z ne sont pas installés.
+// Applique les règles bancaires configurables aux nouvelles lignes importées.
+// Écrit les suggestions dans H:I (compte, programme) et P:W (fournisseur…ID règle).
+// Ne touche jamais aux lignes Classée. Ne bloque jamais l'import.
+// Retourne { avertissement, conflits }.
 function appliquerReglesBancairesImport_(feuille, ligneDepart, nombreLignes, classeur) {
-  if (!nombreLignes) return;
+  if (!nombreLignes) {
+    return { avertissement: null, conflits: [] };
+  }
+
+  const ss = classeur || SpreadsheetApp.getActive();
+
+  // Charger les règles une seule fois — une erreur ici ne bloque pas l'import
+  let regles;
+  try {
+    regles = chargerReglesBancairesActives_(ss);
+  } catch (e) {
+    Logger.log('Import bancaire – règles non appliquées : ' + e.message);
+    return {
+      avertissement:
+        'Import réussi, mais les règles bancaires n\'ont pas été appliquées : ' +
+        e.message,
+      conflits: []
+    };
+  }
+
+  if (!regles.length) {
+    return { avertissement: null, conflits: [] };
+  }
+
+  // Préparer les colonnes T:W — échec non-bloquant : repli sur P:S seulement
+  let colonnesEtenduesdispo = true;
+  let avertissementColonnes = null;
+  try {
+    preparerColonnesExtenduesImportBancaire_(ss);
+  } catch (eCols) {
+    colonnesEtenduesdispo = false;
+    avertissementColonnes =
+      'Import réussi, suggestions limitées aux colonnes P:S (T:W inaccessibles) : ' +
+      eCols.message;
+    Logger.log('Import bancaire – colonnes étendues non disponibles : ' + eCols.message);
+  }
+
+  // Charger les dictionnaires de noms une seule fois
+  const dictos = chargerDictionnairesNoms_(ss);
+
+  // Lire les données des nouvelles lignes (A:M = 13 colonnes)
+  const donnees = feuille
+    .getRange(ligneDepart, 1, nombreLignes, 13)
+    .getValues();
+
+  // Tableaux de sortie pré-remplis à vide (écriture groupée à la fin)
+  const outputHI = [];
+  const outputPW = [];
+  for (let k = 0; k < nombreLignes; k++) {
+    outputHI.push(['', '']);
+    outputPW.push(['', '', '', '', '', '', '', '']);
+  }
+
+  const conflits = [];
+
+  for (let i = 0; i < nombreLignes; i++) {
+    const statut = String(donnees[i][10] || '').trim();  // col K (index 10)
+    if (statut !== 'À classer') continue;
+
+    const description = String(donnees[i][2] || '').trim();  // col C (index 2)
+    const montant = Number(donnees[i][3]) || 0;               // col D (index 3)
+
+    let suggestion = null;
+    try {
+      suggestion = rechercherRegleBancaireDansListe_(regles, description, montant);
+    } catch (e) {
+      // Conflit de règles : laisser les suggestions vides, continuer
+      conflits.push({
+        ligne: ligneDepart + i,
+        description: description,
+        message: e.message
+      });
+      continue;
+    }
+
+    if (!suggestion) continue;
+
+    const nomFournisseur = suggestion.idFournisseur
+      ? (dictos.fournisseurs[suggestion.idFournisseur] || '')
+      : '';
+    const nomContact = suggestion.idContact
+      ? (dictos.contacts[suggestion.idContact] || '')
+      : '';
+
+    outputHI[i] = [suggestion.codeCompte || '', suggestion.programme || ''];
+    outputPW[i] = [
+      suggestion.idFournisseur  || '',
+      nomFournisseur,
+      suggestion.idContact      || '',
+      nomContact,
+      suggestion.typeClassement || '',
+      suggestion.composante     || '',
+      suggestion.projet         || '',
+      suggestion.idRegle        || ''
+    ];
+  }
 
   try {
-    const ss = classeur || SpreadsheetApp.getActive();
-    const donnees = feuille
-      .getRange(ligneDepart, 1, nombreLignes, 13)
-      .getValues();
+    // Écriture groupée : setNumberFormat('@') AVANT setValues sur les deux plages
+    feuille.getRange(ligneDepart, 8, nombreLignes, 2)
+      .setNumberFormat('@')
+      .setValues(outputHI);
 
-    for (let i = 0; i < nombreLignes; i++) {
-      const statut = String(donnees[i][10] || '').trim();
-      if (statut !== 'À classer') continue;
-
-      const description = String(donnees[i][2] || '').trim();
-      const montant = Number(donnees[i][3]) || 0;
-
-      const regle = rechercherRegleBancaire_(ss, description, montant);
-      if (!regle) continue;
-
-      const ligneSheet = ligneDepart + i;
-
-      feuille.getRange(ligneSheet, 16, 1, 4).clearDataValidations();
-      if (regle.idFournisseur) {
-        feuille.getRange(ligneSheet, 16).setNumberFormat('@').setValue(regle.idFournisseur);
-        feuille.getRange(ligneSheet, 17).setValue(regle.nomFournisseur || '');
-      }
-      if (regle.idContact) {
-        feuille.getRange(ligneSheet, 18).setNumberFormat('@').setValue(regle.idContact);
-        feuille.getRange(ligneSheet, 19).setValue(regle.nomContact || '');
-      }
+    if (colonnesEtenduesdispo) {
+      // P:W (8 colonnes : P=16, Q, R, S, T, U, V, W)
+      feuille.getRange(ligneDepart, 16, nombreLignes, 8)
+        .setNumberFormat('@')
+        .setValues(outputPW);
+    } else {
+      // Repli : P:S seulement (4 colonnes)
+      const outputPS = outputPW.map(function(r) { return r.slice(0, 4); });
+      feuille.getRange(ligneDepart, 16, nombreLignes, 4)
+        .setNumberFormat('@')
+        .setValues(outputPS);
     }
   } catch (e) {
-    // Onglet Fournisseurs, Contacts ou Configuration!T:Z absent : ne pas bloquer l'import
+    Logger.log('Import bancaire – erreur écriture suggestions : ' + e.message);
+    return {
+      avertissement:
+        'Import réussi, mais les suggestions n\'ont pas pu être écrites : ' +
+        e.message,
+      conflits: conflits
+    };
   }
+
+  return { avertissement: avertissementColonnes, conflits: conflits };
 }

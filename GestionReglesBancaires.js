@@ -48,11 +48,185 @@ function installerReglesBancairesConfigurables() {
     const nombreMigrees = migrerReglesBancairesDepuisConfig_(ss, feuille);
     const nombreIdentifies = attribuerIdsReglesBancaires_(feuille);
     verifierIntegriteIdsRegles_(feuille);
+    preparerColonnesExtenduesImportBancaire_(ss);
 
     SpreadsheetApp.getUi().alert(
       'Module de règles bancaires installé.\n\n' +
       'Règles migrées depuis Configuration!T:Z : ' + nombreMigrees + '\n' +
       'Identifiants attribués : ' + nombreIdentifies
+    );
+  } finally {
+    verrou.releaseLock();
+  }
+}
+
+// ─── Commandes publiques ───────────────────────────────────────────────────────
+
+function validerReglesBancairesConfigurables() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  try {
+    const regles = chargerReglesBancairesActives_(ss);
+    SpreadsheetApp.getUi().alert(
+      'Validation réussie\n\n' +
+      regles.length + ' règle(s) active(s) valide(s) chargée(s).'
+    );
+  } catch (e) {
+    SpreadsheetApp.getUi().alert(
+      'Erreur de validation des règles bancaires\n\n' + e.message
+    );
+  }
+}
+
+function reappliquerReglesBancairesAuxTransactionsAClasser() {
+  const ui = SpreadsheetApp.getUi();
+
+  const reponse = ui.alert(
+    'Réappliquer les règles bancaires',
+    'Cette opération va vider et recalculer les suggestions (colonnes H, I et P:W) ' +
+    'pour toutes les transactions « À classer » dans Import bancaire.\n\n' +
+    'Les transactions « Classée » et leurs données comptables ne seront pas modifiées.\n\n' +
+    'Confirmer ?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (reponse !== ui.Button.YES) {
+    return;
+  }
+
+  const verrou = LockService.getDocumentLock();
+  verrou.waitLock(30000);
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const feuille = ss.getSheetByName('Import bancaire');
+
+    if (!feuille || feuille.getLastRow() < 6) {
+      ui.alert('Import bancaire est introuvable ou ne contient aucune transaction.');
+      return;
+    }
+
+    preparerColonnesExtenduesImportBancaire_(ss);
+
+    let regles;
+    try {
+      regles = chargerReglesBancairesActives_(ss);
+    } catch (e) {
+      ui.alert('Impossible de charger les règles bancaires.\n\n' + e.message);
+      return;
+    }
+
+    const dictos = chargerDictionnairesNoms_(ss);
+    const premiereTransaction = 6;
+    const derniereLigne = feuille.getLastRow();
+    const nbTotal = derniereLigne - premiereTransaction + 1;
+
+    if (nbTotal <= 0) {
+      ui.alert('Aucune transaction dans Import bancaire.');
+      return;
+    }
+
+    // Lire A:W (23 colonnes) pour avoir toutes les données nécessaires
+    const donnees = feuille
+      .getRange(premiereTransaction, 1, nbTotal, 23)
+      .getValues();
+
+    let lignesAnalysees = 0;
+    let reglesTrouvees = 0;
+    let sansCorrespondance = 0;
+    let suggestionsModifiees = 0;
+    const conflits = [];
+
+    for (let i = 0; i < nbTotal; i++) {
+      const statut = String(donnees[i][10] || '').trim();  // col K (index 10)
+      if (statut !== 'À classer') continue;
+
+      lignesAnalysees += 1;
+
+      const description = String(donnees[i][2] || '').trim();  // col C (index 2)
+      const montant = Number(donnees[i][3]) || 0;               // col D (index 3)
+
+      // Comptabiliser les suggestions précédentes (H, P, ou W non vides)
+      const hActuel = String(donnees[i][7] || '').trim();   // col H (index 7)
+      const pActuel = String(donnees[i][15] || '').trim();  // col P (index 15)
+      const wActuel = String(donnees[i][22] || '').trim();  // col W (index 22)
+      if (hActuel || pActuel || wActuel) {
+        suggestionsModifiees += 1;
+      }
+
+      let suggestion = null;
+      let estConflit = false;
+
+      try {
+        suggestion = rechercherRegleBancaireDansListe_(regles, description, montant);
+      } catch (e) {
+        estConflit = true;
+        conflits.push({
+          ligne: premiereTransaction + i,
+          description: description,
+          message: e.message
+        });
+      }
+
+      if (suggestion) {
+        reglesTrouvees += 1;
+      } else if (!estConflit) {
+        sansCorrespondance += 1;
+      }
+
+      const ligneSheet = premiereTransaction + i;
+
+      if (suggestion) {
+        const nomFournisseur = suggestion.idFournisseur
+          ? (dictos.fournisseurs[suggestion.idFournisseur] || '')
+          : '';
+        const nomContact = suggestion.idContact
+          ? (dictos.contacts[suggestion.idContact] || '')
+          : '';
+
+        // H:I — setNumberFormat('@') avant setValues
+        feuille.getRange(ligneSheet, 8, 1, 2)
+          .setNumberFormat('@')
+          .setValues([[suggestion.codeCompte || '', suggestion.programme || '']]);
+
+        // P:W — setNumberFormat('@') avant setValues
+        feuille.getRange(ligneSheet, 16, 1, 8)
+          .setNumberFormat('@')
+          .setValues([[
+            suggestion.idFournisseur  || '',
+            nomFournisseur,
+            suggestion.idContact      || '',
+            nomContact,
+            suggestion.typeClassement || '',
+            suggestion.composante     || '',
+            suggestion.projet         || '',
+            suggestion.idRegle        || ''
+          ]]);
+      } else {
+        // Vider les suggestions (conflit ou aucune correspondance)
+        feuille.getRange(ligneSheet, 8, 1, 2).clearContent();
+        feuille.getRange(ligneSheet, 16, 1, 8).clearContent();
+      }
+    }
+
+    SpreadsheetApp.flush();
+
+    const conflitsMsg = conflits.length > 0
+      ? '\n\nConflits de règles (' + conflits.length + ') :\n' +
+        conflits.map(function(c) {
+          return '• Ligne ' + c.ligne + ' – ' +
+            c.description.slice(0, 40) + '\n  ' + c.message;
+        }).join('\n')
+      : '';
+
+    ui.alert(
+      'Réapplication terminée\n\n' +
+      'Lignes À classer analysées         : ' + lignesAnalysees + '\n' +
+      'Règles correspondantes             : ' + reglesTrouvees + '\n' +
+      'Sans correspondance                : ' + sansCorrespondance + '\n' +
+      'Conflits de règles                 : ' + conflits.length + '\n' +
+      'Suggestions effacées / remplacées  : ' + suggestionsModifiees +
+      conflitsMsg
     );
   } finally {
     verrou.releaseLock();
@@ -823,4 +997,126 @@ function verifierIntegriteIdsRegles_(feuille) {
       erreurs.join('\n')
     );
   }
+}
+
+// ─── Helpers d'application (partagés avec ImportCsv.js) ──────────────────────
+
+function chargerDictionnairesNoms_(ss) {
+  const fournisseurs = {};
+  const contacts = {};
+
+  const feuilleFournisseurs = ss.getSheetByName('Fournisseurs');
+  if (feuilleFournisseurs && feuilleFournisseurs.getLastRow() >= 6) {
+    feuilleFournisseurs
+      .getRange(6, 1, feuilleFournisseurs.getLastRow() - 5, 2)
+      .getDisplayValues()
+      .forEach(function(l) {
+        const id = String(l[0] || '').trim();
+        if (id) fournisseurs[id] = String(l[1] || '').trim();
+      });
+  }
+
+  const feuilleContacts = ss.getSheetByName('Contacts');
+  if (feuilleContacts && feuilleContacts.getLastRow() >= 6) {
+    feuilleContacts
+      .getRange(6, 1, feuilleContacts.getLastRow() - 5, 4)
+      .getDisplayValues()
+      .forEach(function(l) {
+        const id = String(l[0] || '').trim();
+        if (id) contacts[id] = String(l[3] || '').trim();
+      });
+  }
+
+  return { fournisseurs: fournisseurs, contacts: contacts };
+}
+
+function preparerColonnesExtenduesImportBancaire_(ss) {
+  const feuille = ss.getSheetByName('Import bancaire');
+  if (!feuille) return;
+
+  // ── 1. Agrandir la feuille avant tout getRange sur T:W ────────────────────
+  const colMax = feuille.getMaxColumns();
+  if (colMax < 23) {
+    feuille.insertColumnsAfter(colMax, 23 - colMax);
+  }
+
+  // ── 2. En-têtes T:W (idempotent, erreur si incompatible) ──────────────────
+  const lettreColonne = { 20: 'T', 21: 'U', 22: 'V', 23: 'W' };
+
+  const attendus = [
+    { col: 20, valeur: 'Type de classement suggéré', largeur: 190 },
+    { col: 21, valeur: 'Composante suggérée',         largeur: 170 },
+    { col: 22, valeur: 'Projet suggéré',              largeur: 130 },
+    { col: 23, valeur: 'ID règle appliquée',          largeur: 130 }
+  ];
+
+  attendus.forEach(function(entete) {
+    const cellule = feuille.getRange(5, entete.col);
+    const valeurActuelle = String(cellule.getValue() || '').trim();
+
+    if (!valeurActuelle) {
+      cellule
+        .setValue(entete.valeur)
+        .setBackground('#f1f3f4')
+        .setFontWeight('bold')
+        .setWrap(true);
+      feuille.setColumnWidth(entete.col, entete.largeur);
+    } else if (valeurActuelle !== entete.valeur) {
+      throw new Error(
+        'Import bancaire : la cellule ' +
+        lettreColonne[entete.col] + '5 contient « ' + valeurActuelle +
+        ' » au lieu de « ' + entete.valeur +
+        ' ». Corrigez manuellement avant de continuer.'
+      );
+    }
+  });
+
+  // ── 3. Formats et validations sur les données (ligne 6 et plus) ────────────
+  const derniereLigne = feuille.getMaxRows();
+  if (derniereLigne < 6) return;
+
+  const plageData = derniereLigne - 5;
+
+  // Format texte sur l'ensemble de T:W
+  feuille.getRange(6, 20, plageData, 4).setNumberFormat('@');
+
+  // T (col 20) : validation Type de classement
+  feuille.getRange(6, 20, plageData, 1)
+    .setDataValidation(
+      SpreadsheetApp.newDataValidation()
+        .requireValueInList(TYPES_CLASSEMENT_REGLES_, true)
+        .setAllowInvalid(true)
+        .build()
+    );
+
+  // U (col 21) : validation Composante
+  feuille.getRange(6, 21, plageData, 1)
+    .setDataValidation(
+      SpreadsheetApp.newDataValidation()
+        .requireValueInList(COMPOSANTES_BANCAIRES_, true)
+        .setAllowInvalid(true)
+        .build()
+    );
+
+  // V (col 22) : validation Projets réels (excluant Exemple)
+  const feuilleProjets = ss.getSheetByName('Projets');
+  if (feuilleProjets && feuilleProjets.getLastRow() >= 6) {
+    const idsProjets = feuilleProjets
+      .getRange(6, 1, feuilleProjets.getLastRow() - 5, 4)
+      .getDisplayValues()
+      .filter(function(l) { return l[0] && l[3] !== 'Exemple'; })
+      .map(function(l) { return String(l[0]).trim(); });
+
+    if (idsProjets.length > 0) {
+      feuille.getRange(6, 22, plageData, 1)
+        .setDataValidation(
+          SpreadsheetApp.newDataValidation()
+            .requireValueInList(idsProjets, true)
+            .setAllowInvalid(true)
+            .build()
+        );
+    }
+  }
+
+  // W (col 23) : format texte uniquement (déjà inclus dans le setNumberFormat groupé)
 }

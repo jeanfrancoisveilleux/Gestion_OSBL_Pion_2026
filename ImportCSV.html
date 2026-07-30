@@ -135,6 +135,23 @@
       font-weight: 600;
     }
 
+    .avertissement-regles {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-left: 4px solid #f29900;
+      border-radius: 4px;
+      background: #fef7e0;
+      color: #5c3d00;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .avertissement-regles strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+
     .confidentiel {
       margin-top: 14px;
       color: #5f6368;
@@ -337,6 +354,32 @@
         contenu += '<br><br>' + resultat.message;
       }
 
+      // Avertissement des règles bancaires (import réussi mais règles partiellement appliquées)
+      if (resultat.avertissementRegles) {
+        contenu +=
+          '<div class="avertissement-regles">' +
+          '<strong>Règles bancaires</strong>' +
+          escapeHtml(resultat.avertissementRegles) +
+          '</div>';
+      }
+
+      // Conflits de règles : plusieurs règles correspondaient à une même transaction
+      if (resultat.conflitsRegles && resultat.conflitsRegles.length > 0) {
+        const n = resultat.conflitsRegles.length;
+        let blocConflits =
+          '<div class="avertissement-regles">' +
+          '<strong>' + n + ' conflit' + (n > 1 ? 's' : '') +
+          ' de règles bancaires — suggestions non appliquées</strong>';
+        resultat.conflitsRegles.forEach(function(c) {
+          blocConflits +=
+            'Ligne ' + escapeHtml(String(c.ligne)) +
+            ' — ' + escapeHtml(c.description || '') +
+            '<br><em>' + escapeHtml(c.message || '') + '</em><br>';
+        });
+        blocConflits += '</div>';
+        contenu += blocConflits;
+      }
+
       zoneImport.style.display = 'none';
       progression.className = 'progression';
       confidentiel.style.display = 'none';
@@ -376,6 +419,15 @@
         clearInterval(minuterie);
         minuterie = null;
       }
+    }
+
+    function escapeHtml(texte) {
+      return String(texte)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
     }
   </script>
 </body>
