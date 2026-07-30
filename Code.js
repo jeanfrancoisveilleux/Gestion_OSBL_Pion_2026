@@ -36,6 +36,10 @@ function onOpen() {
       'installerGestionFournisseursContacts'
     )
     .addItem(
+      'Installer les règles bancaires',
+      'installerReglesBancairesConfigurables'
+    )
+    .addItem(
       'Installer le rapport fournisseurs',
       'installerRapportDepensesFournisseurs'
     )
