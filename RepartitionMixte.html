@@ -280,6 +280,24 @@
         color: var(--rouge);
         margin-left: 2px;
       }
+
+      .info-preclassement {
+        display: none;
+        margin: 12px 0 14px;
+        padding: 10px 14px;
+        border-left: 4px solid #f29900;
+        border-radius: 6px;
+        background: #fef9e7;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #5c3d00;
+      }
+
+      .info-preclassement .avert-compte {
+        margin-top: 6px;
+        color: var(--orange);
+        font-weight: 600;
+      }
     </style>
   </head>
   <body>
@@ -302,6 +320,9 @@
         <div class="montant-bancaire" id="montantBancaire"></div>
       </div>
     </div>
+
+    <!-- Encadré préclassement (visible uniquement si une règle a pré-rempli le formulaire) -->
+    <div id="infoPreclassement" class="info-preclassement"></div>
 
     <!-- Choix de mode (montants positifs seulement) -->
     <div id="sectionChoixMode" style="display:none">
@@ -1091,6 +1112,30 @@
             }
           });
         });
+      }
+
+      // ── Encadré préclassement ──────────────────────────────
+      if (DONNEES.preclassementActif) {
+        const blocPreclassement = document.getElementById('infoPreclassement');
+        const idRegle = DONNEES.idRegleSuggeree || '';
+        const msgBase = idRegle
+          ? 'Préclassement proposé par la règle ' + idRegle + ' — vérifiez les valeurs avant d\'enregistrer.'
+          : 'Préclassement proposé — vérifiez les valeurs avant d\'enregistrer.';
+
+        const pMsg = document.createElement('p');
+        pMsg.style.margin = '0';
+        pMsg.textContent = msgBase;
+        blocPreclassement.appendChild(pMsg);
+
+        if (DONNEES.avertissementPreclassement) {
+          const pAvert = document.createElement('p');
+          pAvert.className = 'avert-compte';
+          pAvert.style.margin = '6px 0 0';
+          pAvert.textContent = DONNEES.avertissementPreclassement;
+          blocPreclassement.appendChild(pAvert);
+        }
+
+        blocPreclassement.style.display = '';
       }
 
       document.getElementById('ajouter').addEventListener('click', () => {

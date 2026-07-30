@@ -816,6 +816,49 @@ function ouvrirRepartitionPourRevisionTransaction_(
   );
 }
 
+// ─── Helpers suggestions configurables ────────────────────────────────────────
+
+// Extrait les suggestions déjà enregistrées dans Import bancaire H:I et P:W.
+// valeurs : tableau lu depuis la ligne d'import (au moins 23 éléments, complété de '' si besoin).
+function extraireSuggestionsImportBancaire_(valeurs) {
+  return {
+    nomCompte:      String(valeurs[7]  || '').trim(),  // H = index 7
+    programme:      String(valeurs[8]  || '').trim(),  // I = index 8
+    idFournisseur:  String(valeurs[15] || '').trim(),  // P = index 15
+    nomFournisseur: String(valeurs[16] || '').trim(),  // Q = index 16
+    idContact:      String(valeurs[17] || '').trim(),  // R = index 17
+    nomContact:     String(valeurs[18] || '').trim(),  // S = index 18
+    typeClassement: String(valeurs[19] || '').trim(),  // T = index 19
+    composante:     String(valeurs[20] || '').trim(),  // U = index 20
+    projet:         String(valeurs[21] || '').trim(),  // V = index 21
+    idRegle:        String(valeurs[22] || '').trim()   // W = index 22
+  };
+}
+
+// Résout le code comptable à partir du NOM enregistré en H.
+// comptes : tableau {code, nom, type} des comptes autorisés du mode courant.
+// Retourne {code, avertissement}.  Ne lève jamais d'erreur.
+function resoudreCodeCompteDepuisNom_(comptes, nomCompte) {
+  if (!nomCompte) {
+    return { code: '', avertissement: '' };
+  }
+  const nomNormalise = String(nomCompte).trim();
+  const compte = (comptes || []).find(function(c) {
+    return String(c.nom || '').trim() === nomNormalise;
+  });
+  if (compte) {
+    return { code: compte.code, avertissement: '' };
+  }
+  return {
+    code: '',
+    avertissement:
+      'Le compte suggéré « ' + nomNormalise +
+      ' » n\'est plus disponible. Sélectionnez un compte manuellement.'
+  };
+}
+
+// ─── Données interface ─────────────────────────────────────────────────────────
+
 function obtenirDonneesInterfaceMixte_(ligneImport, options) {
   const optionsChargement = options || {};
   const modeRevision = Boolean(optionsChargement.modeRevision);
@@ -825,9 +868,17 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const importBancaire = obtenirFeuilleMixte_(ss, 'Import bancaire');
   const repartition = obtenirFeuilleMixte_(ss, 'Répartition');
-  const valeurs = importBancaire
-    .getRange(ligneImport, 1, 1, 19)
+
+  // Lecture robuste A:W — jusqu'à 23 colonnes; complète de '' si la feuille en a moins
+  const colMaxImport = importBancaire.getMaxColumns();
+  const nbColsLire = Math.min(23, colMaxImport);
+  const valeursRaw = importBancaire
+    .getRange(ligneImport, 1, 1, nbColsLire)
     .getValues()[0];
+  const valeurs = [];
+  for (var ci = 0; ci < 23; ci++) {
+    valeurs.push(ci < valeursRaw.length ? valeursRaw[ci] : '');
+  }
 
   const idImport = String(valeurs[0] || '').trim();
   const statut = String(valeurs[10] || '').trim();
@@ -856,20 +907,24 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
 
   const montantArrondi = arrondirMontantMixte_(montant);
 
+  // Suggestions configurables déjà enregistrées dans H:I et P:W
+  const suggestions = extraireSuggestionsImportBancaire_(valeurs);
+
   if (montant < 0) {
     const donneesComptes = obtenirComptesDépensePourMixte_(ss);
+
+    // Résoudre le code comptable depuis le NOM enregistré en H
+    const resolutionCompte = resoudreCodeCompteDepuisNom_(
+      donneesComptes.comptes,
+      suggestions.nomCompte
+    );
 
     let idFournisseur = '';
     let nomFournisseur = '';
     let idContact = '';
     let nomContact = '';
-    const regle = rechercherRegleBancaire_(
-      ss,
-      String(valeurs[2] || '').trim(),
-      montant
-    );
 
-    // Révision : priorité aux valeurs confirmées de la Transaction active (R:S:T, D)
+    // Révision : priorité absolue aux valeurs confirmées de la Transaction active (R:S:T, D)
     if (modeRevision && idTransactionSource) {
       const ligneSourceTx = trouverTransactionActivePourRevision_(
         ss,
@@ -883,19 +938,13 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
       }
     }
 
-    // Fallback : suggestions Import bancaire P:S, puis règle bancaire, puis FOU-0000
+    // Création : suggestions P:S, puis FOU-0000 si aucun fournisseur identifié
     if (!idFournisseur) {
-      const idFournisseurSuggere = String(valeurs[15] || '').trim();
-      const nomFournisseurSuggere = String(valeurs[16] || '').trim();
-      const idContactSuggere = String(valeurs[17] || '').trim();
-      const nomContactSuggere = String(valeurs[18] || '').trim();
+      idFournisseur = suggestions.idFournisseur;
+      nomFournisseur = suggestions.nomFournisseur;
+      idContact = suggestions.idContact;
+      nomContact = suggestions.nomContact;
 
-      idFournisseur = idFournisseurSuggere || (regle ? regle.idFournisseur : '');
-      nomFournisseur = nomFournisseurSuggere || (regle ? regle.nomFournisseur : '');
-      idContact = idContactSuggere || (regle ? regle.idContact : '');
-      nomContact = nomContactSuggere || (regle ? regle.nomContact : '');
-
-      // FOU-0000 si aucun fournisseur identifié
       if (!idFournisseur) {
         idFournisseur = 'FOU-0000';
         nomFournisseur = obtenirNomFournisseur_(ss, 'FOU-0000') || 'À déterminer';
@@ -918,14 +967,22 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
         };
       });
 
+    // Lignes par défaut : Répartition active prioritaire, sinon suggestions H/I/V
     const lignesDefaut = lignesExistantesDepense.length
       ? lignesExistantesDepense
       : [{
-          compte: regle ? (regle.codeCompte || '') : '',
-          programme: regle ? (regle.programme || '') : '',
-          projet: '',
+          compte: resolutionCompte.code,
+          programme: suggestions.programme,
+          projet: suggestions.projet,
           montant: arrondirMontantMixte_(Math.abs(montant))
         }];
+
+    const preclassementActif = !modeRevision && !!(
+      suggestions.idRegle ||
+      suggestions.nomCompte ||
+      suggestions.idFournisseur ||
+      suggestions.typeClassement
+    );
 
     return {
       typeMouvement: 'depense',
@@ -955,7 +1012,10 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
       nomFournisseur: nomFournisseur,
       idContact: idContact,
       nomContact: nomContact,
-      lignes: lignesDefaut
+      lignes: lignesDefaut,
+      idRegleSuggeree: suggestions.idRegle,
+      preclassementActif: preclassementActif,
+      avertissementPreclassement: resolutionCompte.avertissement
     };
   }
 
@@ -969,9 +1029,9 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
     return String(ligne.valeurs[5] || '').trim() !== '';
   });
 
-  // Détecter le mode à partir des lignes actives de Répartition (col P = index 15)
+  // Détecter le mode depuis les lignes actives de Répartition (col P)
+  // ou depuis la suggestion T en création (jamais en révision)
   let modeRevenuDetecte = 'revenu';
-  let regleBancaireCourant = null;
 
   if (lignesRepartitionExistantes.length > 0) {
     const marqueur = String(lignesRepartitionExistantes[0].valeurs[15] || '').trim();
@@ -979,20 +1039,16 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
       modeRevenuDetecte = 'revenu_direct';
     }
   } else if (!modeRevision) {
-    regleBancaireCourant = rechercherRegleBancaire_(
-      ss,
-      String(valeurs[2] || '').trim(),
-      montant
-    );
-    if (regleBancaireCourant && regleBancaireCourant.codeCompte) {
-      const compteTrouve = donneesRevenusDirects.comptes.find(function(c) {
-        return c.code === regleBancaireCourant.codeCompte;
-      });
-      if (compteTrouve) {
-        modeRevenuDetecte = 'revenu_direct';
-      }
+    if (suggestions.typeClassement === 'Revenu comptable direct') {
+      modeRevenuDetecte = 'revenu_direct';
     }
   }
+
+  // Résoudre le code comptable pour les revenus directs (depuis H)
+  const resolutionCompteRevenu = resoudreCodeCompteDepuisNom_(
+    donneesRevenusDirects.comptes,
+    suggestions.nomCompte
+  );
 
   const dateFormatee = Utilities.formatDate(
     valeurs[1],
@@ -1013,6 +1069,13 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
     montant: montantArrondi
   };
 
+  const preclassementActifRevenu = !modeRevision && !!(
+    suggestions.idRegle ||
+    suggestions.nomCompte ||
+    suggestions.typeClassement ||
+    suggestions.composante
+  );
+
   if (modeRevenuDetecte === 'revenu_direct') {
     const lignesDirectesExistantes = lignesRepartitionExistantes.map(
       function(ligne) {
@@ -1029,16 +1092,10 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
     if (lignesDirectesExistantes.length > 0) {
       lignesDirectesDefaut = lignesDirectesExistantes;
     } else {
-      const comptePreRempli = (regleBancaireCourant && regleBancaireCourant.codeCompte)
-        ? regleBancaireCourant.codeCompte
-        : '';
-      const programmePreRempli = (regleBancaireCourant && regleBancaireCourant.programme)
-        ? regleBancaireCourant.programme
-        : '';
       lignesDirectesDefaut = [{
-        compte: comptePreRempli,
-        programme: programmePreRempli,
-        projet: '',
+        compte: resolutionCompteRevenu.code,
+        programme: suggestions.programme,
+        projet: suggestions.projet,
         montant: montantArrondi
       }];
     }
@@ -1050,7 +1107,10 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
       programmes: donneesRevenusDirects.programmes,
       projets: donneesRevenusDirects.projets,
       options: optionsComposantes,
-      lignes: lignesDirectesDefaut
+      lignes: lignesDirectesDefaut,
+      idRegleSuggeree: suggestions.idRegle,
+      preclassementActif: preclassementActifRevenu,
+      avertissementPreclassement: resolutionCompteRevenu.avertissement
     });
   }
 
@@ -1062,6 +1122,27 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
     };
   });
 
+  // Suggestion de composante pour revenu spécialisé (U → composante, prix normal)
+  var lignesRevenuDefaut;
+  if (lignesExistantes.length) {
+    lignesRevenuDefaut = lignesExistantes;
+  } else if (
+    !modeRevision &&
+    suggestions.typeClassement === 'Entrées, forfaits ou marchandises' &&
+    suggestions.composante
+  ) {
+    const optionTrouvee = optionsComposantes.find(function(opt) {
+      return opt.valeur === suggestions.composante;
+    });
+    lignesRevenuDefaut = [{
+      composante: suggestions.composante,
+      quantite: 1,
+      prixUnitaire: optionTrouvee ? optionTrouvee.prix : 0
+    }];
+  } else {
+    lignesRevenuDefaut = [{ composante: '', quantite: 1, prixUnitaire: 0 }];
+  }
+
   return Object.assign({}, titreBase, {
     typeMouvement: 'revenu',
     comptes: donneesRevenusDirects.comptes,
@@ -1069,9 +1150,10 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
     programmes: donneesRevenusDirects.programmes,
     projets: donneesRevenusDirects.projets,
     options: optionsComposantes,
-    lignes: lignesExistantes.length
-      ? lignesExistantes
-      : [{ composante: '', quantite: 1, prixUnitaire: 0 }]
+    lignes: lignesRevenuDefaut,
+    idRegleSuggeree: suggestions.idRegle,
+    preclassementActif: preclassementActifRevenu,
+    avertissementPreclassement: resolutionCompteRevenu.avertissement
   });
 }
 
