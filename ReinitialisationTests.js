@@ -161,11 +161,14 @@ const SPECS_ONGLETS_REINIT_ = [
     nom: 'Documents',
     ligneDepart: 6,
     colId: 1,
-    // Structure inconnue du code — toutes les colonnes sont effacées dynamiquement.
-    plagesEffacer: null,
+    // A:K = 11 colonnes de données (ID document à Notes)
+    plagesEffacer: [{ col: 1, nbCols: 11, label: 'A:K' }],
     formulesProtegees: [],
-    headersAttendus: [],
-    nbColsMin: 1,
+    headersAttendus: [
+      { col: 1, valeur: 'ID document' },
+      { col: 11, valeur: 'Notes' }
+    ],
+    nbColsMin: 11,
     colIdVerif: null,
     labelVerif: null
   },
@@ -349,7 +352,7 @@ function reinitialiserDonneesTestsAvecVerrou_() {
   ONGLETS_DERIVES_REINIT_.forEach(function(nom) {
     var feuille = ss.getSheetByName(nom);
     if (feuille) {
-      empreintesDerivesAvant[nom] = empreindreOnglet_(feuille);
+      empreintesDerivesAvant[nom] = empreindreFormulesOngletDerive_(feuille);
     }
   });
 
@@ -393,13 +396,7 @@ function reinitialiserDonneesTestsAvecVerrou_() {
         feuille, spec.ligneDepart, nbLignes, spec.formulesProtegees
       );
 
-      // Déterminer les plages à effacer
       var plages = spec.plagesEffacer;
-      if (!plages) {
-        // Documents : détecter le nombre de colonnes dynamiquement
-        var lastCol = Math.max(1, feuille.getLastColumn());
-        plages = [{ col: 1, nbCols: lastCol, label: 'A:' + colLetter_(lastCol) }];
-      }
 
       // Effacer les plages (clearContent préserve validations, formats, largeurs de colonne)
       for (var p = 0; p < plages.length; p++) {
@@ -409,29 +406,33 @@ function reinitialiserDonneesTestsAvecVerrou_() {
 
       SpreadsheetApp.flush();
 
-      // Vérifier que les plages effacées sont réellement vides
-      var erreursVides = verifierPlagesEffacees_(
-        feuille, spec.ligneDepart, nbLignes, plages
-      );
-      erreursVides.forEach(function(e) { erreurs.push(e); });
+      // Vérifier les résultats de l'effacement — arrêt immédiat sur toute anomalie
+      var erreursOnglet = [];
 
-      // Vérifier que les formules protégées sont intactes sur toutes les lignes
-      var erreursFormulas = verifierFormulasProtegees_(
+      verifierPlagesEffacees_(feuille, spec.ligneDepart, nbLignes, plages)
+        .forEach(function(e) { erreursOnglet.push(e); });
+
+      verifierFormulasProtegees_(
         feuille, spec.ligneDepart, nbLignes, formulasAvant, spec.formulesProtegees
-      );
-      erreursFormulas.forEach(function(e) { erreurs.push(e); });
+      ).forEach(function(e) { erreursOnglet.push(e); });
 
-      // Vérifier que la colonne identifiant est vide
       if (spec.colIdVerif) {
         var nbReste = compterLignesAvecDonnees_(
           feuille, spec.colIdVerif, spec.ligneDepart, nbLignes
         );
         if (nbReste > 0) {
-          erreurs.push(
+          erreursOnglet.push(
             spec.nom + ' : ' + nbReste +
             ' ligne(s) encore non videe(s) (' + spec.labelVerif + ')'
           );
         }
+      }
+
+      if (erreursOnglet.length > 0) {
+        throw new Error(
+          'Anomalies de verification (' + erreursOnglet.length + ') :\n' +
+          erreursOnglet.join('\n')
+        );
       }
 
       var labelsEffaces = plages.map(function(pp) { return pp.label; }).join(', ');
@@ -479,7 +480,7 @@ function reinitialiserDonneesTestsAvecVerrou_() {
     var feuilleD = ss.getSheetByName(nom);
     if (!feuilleD || !empreintesDerivesAvant[nom]) return;
 
-    var empreinteApres = empreindreOnglet_(feuilleD);
+    var empreinteApres = empreindreFormulesOngletDerive_(feuilleD);
     if (empreinteApres !== empreintesDerivesAvant[nom]) {
       erreursDerives.push('Structure modifiee sur l\'onglet derive : ' + nom);
       erreurs.push(
@@ -583,17 +584,25 @@ function executerAuditReinit_(ss) {
     }
 
     // Vérifier les en-têtes attendus (ligne 5, cellule par cellule)
-    if (spec.headersAttendus.length && feuille.getLastRow() >= 5) {
-      spec.headersAttendus.forEach(function(ha) {
-        var valeurReelle = String(feuille.getRange(5, ha.col).getValue() || '').trim();
-        if (valeurReelle !== ha.valeur) {
-          rapport.problemes.push(
-            spec.nom + ' col ' + colLetter_(ha.col) + '5 : en-tete « ' +
-            valeurReelle + ' » (attendu « ' + ha.valeur + ' ») — structure incompatible'
-          );
-          rapport.bloquant = true;
-        }
-      });
+    if (spec.headersAttendus.length) {
+      if (feuille.getLastRow() < 5) {
+        rapport.problemes.push(
+          spec.nom + ' : ligne 5 absente (getLastRow = ' + feuille.getLastRow() +
+          ') — en-tetes non verifiables, structure incompatible'
+        );
+        rapport.bloquant = true;
+      } else {
+        spec.headersAttendus.forEach(function(ha) {
+          var valeurReelle = String(feuille.getRange(5, ha.col).getValue() || '').trim();
+          if (valeurReelle !== ha.valeur) {
+            rapport.problemes.push(
+              spec.nom + ' col ' + colLetter_(ha.col) + '5 : en-tete « ' +
+              valeurReelle + ' » (attendu « ' + ha.valeur + ' ») — structure incompatible'
+            );
+            rapport.bloquant = true;
+          }
+        });
+      }
     }
 
     // Vérifier l'absence de superposition entre plages à effacer et formules protégées
@@ -613,14 +622,9 @@ function executerAuditReinit_(ss) {
       );
     }
 
-    // Déterminer le label des colonnes effacées
-    var labelsEffaces = 'aucune';
-    if (spec.plagesEffacer) {
-      labelsEffaces = spec.plagesEffacer.map(function(p) { return p.label; }).join(', ');
-    } else {
-      var lastColDyn = Math.max(1, feuille.getLastColumn());
-      labelsEffaces = 'A:' + colLetter_(lastColDyn) + ' (detecte)';
-    }
+    var labelsEffaces = spec.plagesEffacer
+      ? spec.plagesEffacer.map(function(p) { return p.label; }).join(', ')
+      : 'aucune';
 
     rapport.ongletsReinitInfo.push({
       nom: spec.nom,
@@ -796,6 +800,45 @@ function verifierPlagesEffacees_(feuille, ligneDepart, nbLignes, plages) {
   });
 
   return erreurs;
+}
+
+// Produit une empreinte SHA-256 basée uniquement sur les formules d'un onglet dérivé.
+// Conçue pour les rapports à formules QUERY/déversées (Rapports, Rapport fournisseurs) :
+// les résultats déversés peuvent apparaître ou disparaître après effacement des données
+// source, donc les valeurs affichées sont exclues de l'empreinte.
+// Inclut : getMaxRows(), getMaxColumns(), coordonnées et texte de chaque cellule formule.
+function empreindreFormulesOngletDerive_(feuille) {
+  var maxRow = feuille.getMaxRows();
+  var maxCol = feuille.getMaxColumns();
+
+  if (maxRow < 1 || maxCol < 1) {
+    return 'VIDE-0x0';
+  }
+
+  var formulas = feuille.getRange(1, 1, maxRow, maxCol).getFormulas();
+
+  var parties = [String(maxRow), String(maxCol)];
+  for (var i = 0; i < maxRow; i++) {
+    for (var j = 0; j < maxCol; j++) {
+      var formule = formulas[i][j];
+      if (formule) {
+        // Coordonnées + texte exact : détecte tout déplacement ou modification de formule
+        parties.push((i + 1) + '\x01' + (j + 1) + '\x01' + formule);
+      }
+    }
+  }
+
+  var contenu = parties.join('\x02');
+
+  var octets = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    contenu,
+    Utilities.Charset.UTF_8
+  );
+
+  return octets.map(function(o) {
+    return ('0' + (o < 0 ? o + 256 : o).toString(16)).slice(-2);
+  }).join('');
 }
 
 // Convertit un numéro de colonne en lettre(s) Excel (1=A, 26=Z, 27=AA ...).
