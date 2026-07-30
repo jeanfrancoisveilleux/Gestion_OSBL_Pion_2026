@@ -53,11 +53,9 @@ function ouvrirRapprochementBancaire() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   preparerOngletRapprochement_(ss);
 
-  const modele = HtmlService.createTemplateFromFile('RapprochementBancaire');
-  modele.DONNEES_INITIALES = obtenirDonneesRapprochementBancaire();
-
   SpreadsheetApp.getUi().showModalDialog(
-    modele.evaluate().setWidth(1100).setHeight(780),
+    HtmlService.createHtmlOutputFromFile('RapprochementBancaire')
+      .setWidth(1100).setHeight(780),
     'Rapprochement bancaire'
   );
 }

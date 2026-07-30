@@ -276,13 +276,6 @@
     </div>
 
     <script>
-      // Données initiales injectées par le serveur Apps Script.
-      // Utiliser <?!= (sans encodage HTML) car JSON contient des guillemets doubles
-      // qui seraient transformés en &quot; par <?= et rendraient le JSON invalide
-      // dans un contexte <script> (les entités HTML ne sont pas décodées par le
-      // moteur JavaScript).
-      var DONNEES = <?!= JSON.stringify(DONNEES_INITIALES) ?>;
-
       var etat = null;
       var formatMonetaire = new Intl.NumberFormat('fr-CA', {
         style: 'currency',
@@ -301,17 +294,41 @@
       };
 
       // ── Initialisation ───────────────────────────────────────────────────────
-      // Le script est placé en bas de <body> : le DOM est entièrement chargé
-      // avant que cette ligne s'exécute. Aucun DOMContentLoaded requis.
-      chargerEtat(DONNEES);
+      // Les événements sont attachés avant l'appel serveur afin que le bouton
+      // Actualiser soit opérationnel même si le chargement initial échoue.
+      document.addEventListener('DOMContentLoaded', function() {
+        elements.selectAnnee.addEventListener('change', function() {
+          afficherDonnees();
+        });
 
-      elements.selectAnnee.addEventListener('change', function() {
-        afficherDonnees();
+        elements.btnActualiser.addEventListener('click', function() {
+          actualiser();
+        });
+
+        google.script.run
+          .withSuccessHandler(function(donnees) {
+            initialiserInterface(donnees || {
+              lignes: [],
+              annees: [],
+              anneeDefaut: new Date().getFullYear()
+            });
+          })
+          .withFailureHandler(function(erreur) {
+            afficherErreurInitialisation(erreur);
+          })
+          .obtenirDonneesRapprochementBancaire();
       });
 
-      elements.btnActualiser.addEventListener('click', function() {
-        actualiser();
-      });
+      function initialiserInterface(donnees) {
+        chargerEtat(donnees);
+      }
+
+      function afficherErreurInitialisation(erreur) {
+        afficherMessage(
+          'Erreur lors du chargement initial.\n' + obtenirMessageErreur(erreur),
+          'erreur'
+        );
+      }
 
       // ── Actualisation serveur ────────────────────────────────────────────────
       function actualiser() {
@@ -346,16 +363,15 @@
         elements.selectAnnee.innerHTML = '';
 
         if (!etat || !etat.annees || etat.annees.length === 0) {
-          // Import bancaire ne contient aucune donnée valide.
           afficherMessage(
-            'Aucune donnée trouvée dans l\'onglet « Import bancaire ».\n' +
+            'Aucune donnée dans l\'onglet « Import bancaire ».\n' +
             'Importez d\'abord un relevé Desjardins, puis cliquez sur « Actualiser ».',
             'info'
           );
           return;
         }
 
-        // annees est déjà trié en ordre décroissant par le serveur.
+        // annees est trié en ordre décroissant par le serveur.
         etat.annees.forEach(function(annee) {
           var opt = document.createElement('option');
           opt.value = annee;
@@ -382,8 +398,6 @@
           return;
         }
 
-        // Si le sélecteur n'a pas de valeur (aucune option sélectionnée),
-        // utiliser anneeDefaut pour ne pas afficher un tableau vide silencieusement.
         var annee = Number(elements.selectAnnee.value) ||
           (etat && etat.anneeDefaut) ||
           0;
@@ -566,7 +580,7 @@
       function obtenirMessageErreur(erreur) {
         if (erreur && erreur.message) { return erreur.message; }
         if (typeof erreur === 'string') { return erreur; }
-        return 'Une erreur inattendue s’est produite.';
+        return 'Une erreur inattendue s\'est produite.';
       }
     </script>
   </body>
