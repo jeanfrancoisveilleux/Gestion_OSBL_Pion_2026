@@ -96,9 +96,9 @@ function obtenirDonneesRapprochementBancaire() {
   const lignes = [];
 
   valeurs.forEach(function(ligne) {
-    const cle = String(ligne[0] || '').trim();
+    const cle = normaliserCleMoisRappr_(ligne[0]);
 
-    if (!cle || !cle.match(/^\d{4}-\d{2}$/)) {
+    if (!cle) {
       return;
     }
 
@@ -352,7 +352,7 @@ function calculerEtEcrireRapprochement_(ss) {
       .getValues();
 
     vals.forEach(function(ligne) {
-      const cle = String(ligne[0] || '').trim();
+      const cle = normaliserCleMoisRappr_(ligne[0]);
 
       if (cle) {
         existant[cle] = {
@@ -747,6 +747,14 @@ function cleAnneesMoisRappr_(date) {
     '-' +
     String(date.getMonth() + 1).padStart(2, '0')
   );
+}
+
+function normaliserCleMoisRappr_(valeur) {
+  if (valeur instanceof Date && !isNaN(valeur.getTime())) {
+    return cleAnneesMoisRappr_(valeur);
+  }
+  const s = String(valeur || '').trim();
+  return s.match(/^\d{4}-\d{2}$/) ? s : '';
 }
 
 function libelleMoisRappr_(annee, mois) {
