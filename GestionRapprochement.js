@@ -64,13 +64,22 @@ function ouvrirRapprochementBancaire() {
 
 function obtenirDonneesRapprochementBancaire() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Années tirées directement de Import bancaire — source primaire indépendante
+  // de l'état de l'onglet Rapprochement bancaire. Permet de peupler le sélecteur
+  // dès la première ouverture, avant toute actualisation.
+  const annees = obtenirAnneesDepuisImportBancaire_(ss);
+  const anneeDefaut = annees.length > 0
+    ? annees[0]
+    : new Date().getFullYear();
+
   const feuille = ss.getSheetByName(CONFIG_RAPPROCHEMENT.nomFeuille);
 
   if (!feuille || feuille.getLastRow() < CONFIG_RAPPROCHEMENT.premiereLigne) {
     return {
       lignes: [],
-      annees: [],
-      anneeDefaut: CONFIG_RAPPROCHEMENT.ANNEE_DEBUT
+      annees: annees,
+      anneeDefaut: anneeDefaut
     };
   }
 
@@ -87,7 +96,6 @@ function obtenirDonneesRapprochementBancaire() {
     .getValues();
 
   const lignes = [];
-  const anneesIndex = {};
 
   valeurs.forEach(function(ligne) {
     const cle = String(ligne[0] || '').trim();
@@ -99,8 +107,6 @@ function obtenirDonneesRapprochementBancaire() {
     const parties = cle.split('-');
     const annee = Number(parties[0]);
     const mois = Number(parties[1]);
-
-    anneesIndex[annee] = true;
 
     lignes.push({
       cle: cle,
@@ -121,11 +127,6 @@ function obtenirDonneesRapprochementBancaire() {
       notes: String(ligne[12] || '')
     });
   });
-
-  const annees = Object.keys(anneesIndex).map(Number).sort();
-  const anneeDefaut = annees.length > 0
-    ? annees[annees.length - 1]
-    : CONFIG_RAPPROCHEMENT.ANNEE_DEBUT;
 
   return { lignes: lignes, annees: annees, anneeDefaut: anneeDefaut };
 }
@@ -312,11 +313,11 @@ function calculerEtEcrireRapprochement_(ss) {
       'Validation des soldes d’ouverture échouée.\n' +
       'Solde bancaire calculé (première transaction ' +
       '« Import bancaire ») : ' +
-      soldeOuvertureBancaire0.toFixed(2) + ' $\n' +
+      soldeOuvertureBancaire0.toFixed(2) + ' $\n' +
       'Solde comptable compte ' +
       CONFIG_RAPPROCHEMENT.COMPTE_BANCAIRE +
       ' (« Soldes ouverture ») : ' +
-      soldeOuverture1000.toFixed(2) + ' $\n' +
+      soldeOuverture1000.toFixed(2) + ' $\n' +
       'Vérifiez l’onglet « Soldes ouverture » ' +
       'ou les premières transactions de l’onglet ' +
       '« Import bancaire ».'
@@ -569,6 +570,34 @@ function calculerEtEcrireRapprochement_(ss) {
 }
 
 // ─── Chargement des données sources ──────────────────────────────────────────
+
+function obtenirAnneesDepuisImportBancaire_(ss) {
+  const feuille = ss.getSheetByName('Import bancaire');
+
+  if (!feuille || feuille.getLastRow() < 6) {
+    return [];
+  }
+
+  const nbLignes = feuille.getLastRow() - 5;
+  const valeurs = feuille.getRange(6, 1, nbLignes, 2).getValues();
+  const anneesIndex = {};
+
+  valeurs.forEach(function(ligne) {
+    const idImport = String(ligne[0] || '').trim();
+    const date = ligne[1];
+
+    if (!idImport || !(date instanceof Date) || isNaN(date.getTime())) {
+      return;
+    }
+
+    anneesIndex[date.getFullYear()] = true;
+  });
+
+  // Tri décroissant : l'année la plus récente est affichée en premier dans le sélecteur.
+  return Object.keys(anneesIndex)
+    .map(Number)
+    .sort(function(a, b) { return b - a; });
+}
 
 function chargerImportBancaire_Rappr_(ss) {
   const feuille = ss.getSheetByName('Import bancaire');

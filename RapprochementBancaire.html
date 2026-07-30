@@ -100,6 +100,8 @@
         border-radius: 8px;
         font-weight: 600;
         font-size: 13px;
+        white-space: pre-wrap;
+        word-break: break-word;
       }
 
       .message.succes { display: block; color: var(--vert); background: var(--vert-pale); }
@@ -274,6 +276,13 @@
     </div>
 
     <script>
+      // Données initiales injectées par le serveur Apps Script.
+      // Utiliser <?!= (sans encodage HTML) car JSON contient des guillemets doubles
+      // qui seraient transformés en &quot; par <?= et rendraient le JSON invalide
+      // dans un contexte <script> (les entités HTML ne sont pas décodées par le
+      // moteur JavaScript).
+      var DONNEES = <?!= JSON.stringify(DONNEES_INITIALES) ?>;
+
       var etat = null;
       var formatMonetaire = new Intl.NumberFormat('fr-CA', {
         style: 'currency',
@@ -292,18 +301,17 @@
       };
 
       // ── Initialisation ───────────────────────────────────────────────────────
-      (function init() {
-        var donnees = <?= JSON.stringify(DONNEES_INITIALES) ?>;
-        chargerEtat(donnees);
+      // Le script est placé en bas de <body> : le DOM est entièrement chargé
+      // avant que cette ligne s'exécute. Aucun DOMContentLoaded requis.
+      chargerEtat(DONNEES);
 
-        elements.selectAnnee.addEventListener('change', function() {
-          afficherDonnees();
-        });
+      elements.selectAnnee.addEventListener('change', function() {
+        afficherDonnees();
+      });
 
-        elements.btnActualiser.addEventListener('click', function() {
-          actualiser();
-        });
-      })();
+      elements.btnActualiser.addEventListener('click', function() {
+        actualiser();
+      });
 
       // ── Actualisation serveur ────────────────────────────────────────────────
       function actualiser() {
@@ -334,21 +342,24 @@
       }
 
       function remplirSelectAnnee() {
-        var anneeActive = Number(elements.selectAnnee.value || 0);
-        elements.selectAnnee.textContent = '';
+        var anneeActive = Number(elements.selectAnnee.value) || 0;
+        elements.selectAnnee.innerHTML = '';
 
         if (!etat || !etat.annees || etat.annees.length === 0) {
-          var opt = document.createElement('option');
-          opt.value = etat ? etat.anneeDefaut : <?= DONNEES_INITIALES.anneeDefaut ?>;
-          opt.textContent = opt.value;
-          elements.selectAnnee.appendChild(opt);
+          // Import bancaire ne contient aucune donnée valide.
+          afficherMessage(
+            'Aucune donnée trouvée dans l\'onglet « Import bancaire ».\n' +
+            'Importez d\'abord un relevé Desjardins, puis cliquez sur « Actualiser ».',
+            'info'
+          );
           return;
         }
 
+        // annees est déjà trié en ordre décroissant par le serveur.
         etat.annees.forEach(function(annee) {
           var opt = document.createElement('option');
           opt.value = annee;
-          opt.textContent = annee;
+          opt.textContent = String(annee);
           elements.selectAnnee.appendChild(opt);
         });
 
@@ -356,7 +367,7 @@
           ? anneeActive
           : etat.anneeDefaut;
 
-        elements.selectAnnee.value = cible;
+        elements.selectAnnee.value = String(cible);
       }
 
       // ── Affichage principal ──────────────────────────────────────────────────
@@ -371,8 +382,15 @@
           return;
         }
 
-        var annee = Number(elements.selectAnnee.value || 0);
-        var lignes = etat.lignes.filter(function(l) { return l.annee === annee; });
+        // Si le sélecteur n'a pas de valeur (aucune option sélectionnée),
+        // utiliser anneeDefaut pour ne pas afficher un tableau vide silencieusement.
+        var annee = Number(elements.selectAnnee.value) ||
+          (etat && etat.anneeDefaut) ||
+          0;
+
+        var lignes = etat.lignes.filter(function(l) {
+          return l.annee === annee;
+        });
 
         afficherCartes(lignes);
         afficherTableau(lignes);
@@ -380,7 +398,7 @@
 
       // ── Cartes résumé ────────────────────────────────────────────────────────
       function afficherCartes(lignes) {
-        elements.cartes.textContent = '';
+        elements.cartes.innerHTML = '';
 
         if (lignes.length === 0) {
           return;
@@ -432,7 +450,7 @@
 
       // ── Tableau mensuel ──────────────────────────────────────────────────────
       function afficherTableau(lignes) {
-        elements.corpsTableau.textContent = '';
+        elements.corpsTableau.innerHTML = '';
 
         if (lignes.length === 0) {
           var tr = document.createElement('tr');
@@ -548,7 +566,7 @@
       function obtenirMessageErreur(erreur) {
         if (erreur && erreur.message) { return erreur.message; }
         if (typeof erreur === 'string') { return erreur; }
-        return 'Une erreur inattendue s'est produite.';
+        return 'Une erreur inattendue s’est produite.';
       }
     </script>
   </body>
