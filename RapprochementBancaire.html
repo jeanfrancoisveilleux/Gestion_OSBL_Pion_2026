@@ -553,8 +553,8 @@
         td.className = 'droite';
         td.textContent = formatMonetaire.format(valeur || 0);
 
-        if (colorerEcart && valeur !== 0) {
-          td.style.color = valeur > 0 ? 'var(--vert)' : 'var(--rouge)';
+        if (colorerEcart) {
+          td.style.color = Math.abs(valeur) >= 0.005 ? 'var(--rouge)' : 'var(--vert)';
           td.style.fontWeight = '700';
         } else if (classe === 'positif') {
           td.style.color = 'var(--vert)';
