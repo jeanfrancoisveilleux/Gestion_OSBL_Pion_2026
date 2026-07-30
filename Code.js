@@ -23,6 +23,15 @@ function onOpen() {
     )
     .addSeparator()
     .addItem(
+      'Ouvrir le rapprochement bancaire',
+      'ouvrirRapprochementBancaire'
+    )
+    .addItem(
+      'Installer le rapprochement bancaire',
+      'installerRapprochementBancaire'
+    )
+    .addSeparator()
+    .addItem(
       'Installer Fournisseurs et Contacts',
       'installerGestionFournisseursContacts'
     )

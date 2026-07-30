@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      :root {
+        --bleu: #1a73e8;
+        --bleu-fonce: #174ea6;
+        --bleu-pale: #e8f0fe;
+        --gris-050: #f8f9fa;
+        --gris-100: #f1f3f4;
+        --gris-300: #dadce0;
+        --gris-600: #5f6368;
+        --texte: #202124;
+        --vert: #137333;
+        --vert-pale: #e6f4ea;
+        --rouge: #b3261e;
+        --rouge-pale: #fce8e6;
+        --orange: #b06000;
+        --orange-pale: #fff7df;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        color: var(--texte);
+        background: #fff;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 14px;
+      }
+
+      .page { padding: 20px 24px 24px; }
+
+      h1 { margin: 0 0 4px; font-size: 22px; }
+
+      .sous-titre {
+        margin: 0 0 18px;
+        color: var(--gris-600);
+        font-size: 13px;
+      }
+
+      /* ── Barre de contrôle ── */
+      .barre-controle {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 18px;
+        flex-wrap: wrap;
+      }
+
+      .barre-controle label {
+        font-weight: 700;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      select {
+        min-height: 38px;
+        padding: 6px 10px;
+        border: 1px solid #bdc1c6;
+        border-radius: 7px;
+        color: var(--texte);
+        background: #fff;
+        font: inherit;
+      }
+
+      select:focus { border-color: var(--bleu); outline: 2px solid rgba(26,115,232,.18); }
+
+      button {
+        min-height: 38px;
+        padding: 7px 16px;
+        border: 1px solid var(--gris-300);
+        border-radius: 7px;
+        color: var(--bleu-fonce);
+        background: #fff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:hover { background: var(--gris-050); }
+
+      button.principal {
+        border-color: var(--bleu);
+        color: #fff;
+        background: var(--bleu);
+      }
+
+      button.principal:hover { background: var(--bleu-fonce); }
+      button:disabled { opacity: .55; cursor: wait; }
+
+      /* ── Messages ── */
+      .message {
+        display: none;
+        margin-bottom: 14px;
+        padding: 11px 14px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 13px;
+      }
+
+      .message.succes { display: block; color: var(--vert); background: var(--vert-pale); }
+      .message.erreur { display: block; color: var(--rouge); background: var(--rouge-pale); }
+      .message.info   { display: block; color: var(--orange); background: var(--orange-pale); }
+
+      /* ── Cartes résumé ── */
+      .cartes {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(180px, 1fr));
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+
+      @media (max-width: 800px) {
+        .cartes { grid-template-columns: repeat(2, 1fr); }
+      }
+
+      .carte {
+        padding: 14px 16px;
+        border: 1px solid var(--gris-300);
+        border-radius: 10px;
+        background: var(--gris-050);
+      }
+
+      .carte .etiquette {
+        color: var(--gris-600);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        margin-bottom: 6px;
+      }
+
+      .carte .valeur {
+        font-size: 18px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .carte .valeur.positif { color: var(--vert); }
+      .carte .valeur.negatif { color: var(--rouge); }
+      .carte .valeur.neutre  { color: var(--texte); }
+
+      /* ── Tableau mensuel ── */
+      .conteneur-tableau {
+        overflow-x: auto;
+        border: 1px solid var(--gris-300);
+        border-radius: 10px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      thead th {
+        padding: 9px 10px;
+        background: var(--bleu-pale);
+        font-weight: 700;
+        text-align: left;
+        border-bottom: 2px solid var(--gris-300);
+        position: sticky;
+        top: 0;
+      }
+
+      thead th.droite { text-align: right; }
+      thead th.centre { text-align: center; }
+
+      tbody tr:hover { background: var(--gris-050); }
+
+      tbody td {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--gris-100);
+      }
+
+      tbody td.droite { text-align: right; font-variant-numeric: tabular-nums; }
+      tbody td.centre { text-align: center; }
+
+      tbody tr:last-child td { border-bottom: none; }
+
+      /* ── Pastilles de statut ── */
+      .pastille {
+        display: inline-block;
+        padding: 3px 9px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .pastille.a-completer { background: var(--orange-pale); color: var(--orange); }
+      .pastille.a-verifier  { background: var(--rouge-pale);  color: var(--rouge); }
+      .pastille.pret        { background: var(--vert-pale);   color: var(--vert); }
+      .pastille.vide        { background: var(--gris-100);    color: var(--gris-600); }
+
+      /* ── Vide ── */
+      .vide {
+        padding: 40px 20px;
+        text-align: center;
+        color: var(--gris-600);
+        font-size: 13px;
+      }
+
+      /* ── Chargement ── */
+      .chargement {
+        display: none;
+        align-items: center;
+        gap: 8px;
+        color: var(--gris-600);
+        font-size: 13px;
+      }
+
+      .chargement.visible { display: flex; }
+
+      @keyframes tourner {
+        to { transform: rotate(360deg); }
+      }
+
+      .spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid var(--gris-300);
+        border-top-color: var(--bleu);
+        border-radius: 50%;
+        animation: tourner .7s linear infinite;
+        flex-shrink: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Rapprochement bancaire</h1>
+      <p class="sous-titre">Phase 3A — Tableau de contrôle mensuel (lecture seule)</p>
+
+      <div class="barre-controle">
+        <label for="selectAnnee">Année :</label>
+        <select id="selectAnnee"></select>
+        <button id="btnActualiser" class="principal" type="button">Actualiser</button>
+        <div id="chargement" class="chargement">
+          <div class="spinner"></div>
+          <span>Calcul en cours…</span>
+        </div>
+      </div>
+
+      <div id="message" class="message" role="alert"></div>
+
+      <div id="cartes" class="cartes"></div>
+
+      <div class="conteneur-tableau">
+        <table id="tableau">
+          <thead>
+            <tr>
+              <th>Mois</th>
+              <th class="droite">Ouverture</th>
+              <th class="droite">Entrées</th>
+              <th class="droite">Sorties</th>
+              <th class="droite">Fin bancaire</th>
+              <th class="droite">Fin comptable</th>
+              <th class="centre">Journal</th>
+              <th class="centre">Sans&nbsp;lien</th>
+              <th class="centre">À&nbsp;classer</th>
+              <th class="droite">Écart</th>
+              <th>Statut</th>
+            </tr>
+          </thead>
+          <tbody id="corpsTableau"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <script>
+      var etat = null;
+      var formatMonetaire = new Intl.NumberFormat('fr-CA', {
+        style: 'currency',
+        currency: 'CAD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+
+      var elements = {
+        selectAnnee: document.getElementById('selectAnnee'),
+        btnActualiser: document.getElementById('btnActualiser'),
+        chargement: document.getElementById('chargement'),
+        message: document.getElementById('message'),
+        cartes: document.getElementById('cartes'),
+        corpsTableau: document.getElementById('corpsTableau')
+      };
+
+      // ── Initialisation ───────────────────────────────────────────────────────
+      (function init() {
+        var donnees = <?= JSON.stringify(DONNEES_INITIALES) ?>;
+        chargerEtat(donnees);
+
+        elements.selectAnnee.addEventListener('change', function() {
+          afficherDonnees();
+        });
+
+        elements.btnActualiser.addEventListener('click', function() {
+          actualiser();
+        });
+      })();
+
+      // ── Actualisation serveur ────────────────────────────────────────────────
+      function actualiser() {
+        definirChargement(true);
+        afficherMessage('', '');
+
+        google.script.run
+          .withSuccessHandler(function(donnees) {
+            chargerEtat(donnees);
+            afficherMessage(
+              'Calcul terminé — ' + donnees.lignes.length + ' mois traités.',
+              'succes'
+            );
+            definirChargement(false);
+          })
+          .withFailureHandler(function(erreur) {
+            afficherMessage(obtenirMessageErreur(erreur), 'erreur');
+            definirChargement(false);
+          })
+          .actualiserRapprochementBancaire();
+      }
+
+      // ── Chargement de l'état ─────────────────────────────────────────────────
+      function chargerEtat(donnees) {
+        etat = donnees;
+        remplirSelectAnnee();
+        afficherDonnees();
+      }
+
+      function remplirSelectAnnee() {
+        var anneeActive = Number(elements.selectAnnee.value || 0);
+        elements.selectAnnee.textContent = '';
+
+        if (!etat || !etat.annees || etat.annees.length === 0) {
+          var opt = document.createElement('option');
+          opt.value = etat ? etat.anneeDefaut : <?= DONNEES_INITIALES.anneeDefaut ?>;
+          opt.textContent = opt.value;
+          elements.selectAnnee.appendChild(opt);
+          return;
+        }
+
+        etat.annees.forEach(function(annee) {
+          var opt = document.createElement('option');
+          opt.value = annee;
+          opt.textContent = annee;
+          elements.selectAnnee.appendChild(opt);
+        });
+
+        var cible = anneeActive && etat.annees.indexOf(anneeActive) !== -1
+          ? anneeActive
+          : etat.anneeDefaut;
+
+        elements.selectAnnee.value = cible;
+      }
+
+      // ── Affichage principal ──────────────────────────────────────────────────
+      function afficherDonnees() {
+        if (!etat || !etat.lignes) {
+          afficherMessage(
+            'Aucune donnée disponible. Cliquez sur « Actualiser ».',
+            'info'
+          );
+          afficherCartes([]);
+          afficherTableau([]);
+          return;
+        }
+
+        var annee = Number(elements.selectAnnee.value || 0);
+        var lignes = etat.lignes.filter(function(l) { return l.annee === annee; });
+
+        afficherCartes(lignes);
+        afficherTableau(lignes);
+      }
+
+      // ── Cartes résumé ────────────────────────────────────────────────────────
+      function afficherCartes(lignes) {
+        elements.cartes.textContent = '';
+
+        if (lignes.length === 0) {
+          return;
+        }
+
+        var dernier = lignes[lignes.length - 1];
+        var totalAClasser = lignes.reduce(function(s, l) {
+          return s + l.transactionsAClasser;
+        }, 0);
+
+        var ecart = dernier.ecart;
+
+        elements.cartes.appendChild(
+          creerCarte('Solde bancaire final',
+            formatMonetaire.format(dernier.soldeBancaireFin), 'neutre')
+        );
+        elements.cartes.appendChild(
+          creerCarte('Solde comptable final',
+            formatMonetaire.format(dernier.soldeComptable), 'neutre')
+        );
+        elements.cartes.appendChild(
+          creerCarte('Écart',
+            formatMonetaire.format(ecart),
+            ecart === 0 ? 'positif' : 'negatif')
+        );
+        elements.cartes.appendChild(
+          creerCarte('Transactions à classer',
+            String(totalAClasser),
+            totalAClasser === 0 ? 'positif' : 'negatif')
+        );
+      }
+
+      function creerCarte(etiquette, valeur, classe) {
+        var div = document.createElement('div');
+        div.className = 'carte';
+
+        var e = document.createElement('div');
+        e.className = 'etiquette';
+        e.textContent = etiquette;
+
+        var v = document.createElement('div');
+        v.className = 'valeur ' + (classe || 'neutre');
+        v.textContent = valeur;
+
+        div.appendChild(e);
+        div.appendChild(v);
+        return div;
+      }
+
+      // ── Tableau mensuel ──────────────────────────────────────────────────────
+      function afficherTableau(lignes) {
+        elements.corpsTableau.textContent = '';
+
+        if (lignes.length === 0) {
+          var tr = document.createElement('tr');
+          var td = document.createElement('td');
+          td.colSpan = 11;
+          td.className = 'vide';
+          td.textContent = 'Aucune donnée pour cette année. Cliquez sur « Actualiser » pour calculer.';
+          tr.appendChild(td);
+          elements.corpsTableau.appendChild(tr);
+          return;
+        }
+
+        lignes.forEach(function(l) {
+          var tr = document.createElement('tr');
+
+          ajouterCellule(tr, l.libelle);
+          ajouterCelluleMontant(tr, l.soldeBancaireOuverture);
+          ajouterCelluleMontant(tr, l.entreesBancaires, 'positif');
+          ajouterCelluleMontant(tr, l.sortiesBancaires, 'negatif');
+          ajouterCelluleMontant(tr, l.soldeBancaireFin);
+          ajouterCelluleMontant(tr, l.soldeComptable);
+
+          // Journal équilibré
+          var tdJ = document.createElement('td');
+          tdJ.className = 'centre';
+          tdJ.textContent = l.journalEquilibre ? 'Oui' : 'Non';
+          tdJ.style.color = l.journalEquilibre
+            ? 'var(--vert)'
+            : 'var(--rouge)';
+          tdJ.style.fontWeight = '700';
+          tr.appendChild(tdJ);
+
+          // Sans lien
+          var tdSL = document.createElement('td');
+          tdSL.className = 'centre';
+          tdSL.textContent = l.ecritures1000SansLien;
+          if (l.ecritures1000SansLien > 0) {
+            tdSL.style.color = 'var(--rouge)';
+            tdSL.style.fontWeight = '700';
+          }
+          tr.appendChild(tdSL);
+
+          // À classer
+          var tdAC = document.createElement('td');
+          tdAC.className = 'centre';
+          tdAC.textContent = l.transactionsAClasser;
+          if (l.transactionsAClasser > 0) {
+            tdAC.style.color = 'var(--orange)';
+            tdAC.style.fontWeight = '700';
+          }
+          tr.appendChild(tdAC);
+
+          // Écart
+          ajouterCelluleMontant(tr, l.ecart,
+            l.ecart === 0 ? '' : (l.ecart > 0 ? 'positif' : 'negatif'),
+            true
+          );
+
+          // Statut
+          var tdS = document.createElement('td');
+          var pastille = document.createElement('span');
+          pastille.className = 'pastille ' + classeStatut(l.statut);
+          pastille.textContent = l.statut || '—';
+          tdS.appendChild(pastille);
+          tr.appendChild(tdS);
+
+          elements.corpsTableau.appendChild(tr);
+        });
+      }
+
+      function classeStatut(statut) {
+        if (statut === 'Prêt à rapprocher') { return 'pret'; }
+        if (statut === 'À vérifier') { return 'a-verifier'; }
+        if (statut === 'À compléter') { return 'a-completer'; }
+        return 'vide';
+      }
+
+      function ajouterCellule(tr, texte) {
+        var td = document.createElement('td');
+        td.textContent = texte || '';
+        tr.appendChild(td);
+      }
+
+      function ajouterCelluleMontant(tr, valeur, classe, colorerEcart) {
+        var td = document.createElement('td');
+        td.className = 'droite';
+        td.textContent = formatMonetaire.format(valeur || 0);
+
+        if (colorerEcart && valeur !== 0) {
+          td.style.color = valeur > 0 ? 'var(--vert)' : 'var(--rouge)';
+          td.style.fontWeight = '700';
+        } else if (classe === 'positif') {
+          td.style.color = 'var(--vert)';
+        } else if (classe === 'negatif') {
+          td.style.color = 'var(--rouge)';
+        }
+
+        tr.appendChild(td);
+      }
+
+      // ── Utilitaires ──────────────────────────────────────────────────────────
+      function afficherMessage(texte, type) {
+        elements.message.textContent = texte;
+        elements.message.className = 'message' + (type ? ' ' + type : '');
+      }
+
+      function definirChargement(actif) {
+        elements.btnActualiser.disabled = actif;
+        elements.selectAnnee.disabled = actif;
+        elements.chargement.classList.toggle('visible', actif);
+      }
+
+      function obtenirMessageErreur(erreur) {
+        if (erreur && erreur.message) { return erreur.message; }
+        if (typeof erreur === 'string') { return erreur; }
+        return 'Une erreur inattendue s'est produite.';
+      }
+    </script>
+  </body>
+</html>
