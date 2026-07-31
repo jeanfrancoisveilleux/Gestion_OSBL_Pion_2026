@@ -16,7 +16,8 @@ const MOT_CONFIRMATION_REINIT_ = 'REINITIALISER LES TESTS';
 
 // Spécification de chaque onglet à réinitialiser.
 // plagesEffacer     : [{col, nbCols, label}]  — jamais superposées avec formulesProtegees.
-// formulesProtegees : [{col, nbCols, label}]  — lues avant et vérifiées après.
+// formulesProtegees : [{col, nbCols, label, effacerValeursFixes?}]  — lues avant et vérifiées après.
+//                     effacerValeursFixes: true = cellules sans formule effacées (valeurs historiques).
 // headersAttendus   : [{col, valeur}] — valeur exacte attendue en ligne 5 (vérification structurelle).
 // nbColsMin         : nombre minimum de colonnes requis (bloquant si inférieur).
 // colIdVerif        : colonne dont on vérifie l'absence de données après remise à zéro.
@@ -90,7 +91,8 @@ const SPECS_ONGLETS_REINIT_ = [
     //        les deux cas sont des données de test à supprimer
     // P:Q = notes et synchronisation (données de test)
     // I   = formule montant attribué (qty × prix) — préservée
-    // M:O = formules total réparti / reste / statut — préservées
+    // M:O = formules total réparti / reste / statut — préservées ;
+    //       les lignes annulées conservent des valeurs fixes sans formule : effacées
     plagesEffacer: [
       { col: 1, nbCols: 8, label: 'A:H' },
       { col: 10, nbCols: 3, label: 'J:L' },
@@ -98,7 +100,7 @@ const SPECS_ONGLETS_REINIT_ = [
     ],
     formulesProtegees: [
       { col: 9, nbCols: 1, label: 'I' },
-      { col: 13, nbCols: 3, label: 'M:O' }
+      { col: 13, nbCols: 3, label: 'M:O', effacerValeursFixes: true }
     ],
     headersAttendus: [
       { col: 1, valeur: 'ID import bancaire' },
@@ -227,6 +229,9 @@ function auditerReinitialisationDonneesTests() {
     if (info.colonnesEffacees) {
       ligneInfo += ' | Effacer : ' + info.colonnesEffacees;
     }
+    if (info.nbValeursFixesHistoriques > 0) {
+      ligneInfo += ' | Valeurs fixes historiques : ' + info.nbValeursFixesHistoriques + ' cellule(s)';
+    }
     if (info.formulesProtegees.length) {
       ligneInfo += ' | Formules protegees : ' + info.formulesProtegees.join(', ');
     }
@@ -303,10 +308,12 @@ function reinitialiserDonneesTestsAvecVerrou_() {
   );
   lignesBilan.push('\nDonnees qui seront effacees :');
   rapport.ongletsReinitInfo.forEach(function(info) {
-    lignesBilan.push(
-      '  ' + info.nom + ' : ' + info.nbLignesDonnees +
-      ' ligne(s) — colonnes ' + info.colonnesEffacees
-    );
+    var ligneBilan = '  ' + info.nom + ' : ' + info.nbLignesDonnees +
+      ' ligne(s) — colonnes ' + info.colonnesEffacees;
+    if (info.nbValeursFixesHistoriques > 0) {
+      ligneBilan += ' + ' + info.nbValeursFixesHistoriques + ' valeur(s) fixe(s) historique(s)';
+    }
+    lignesBilan.push(ligneBilan);
   });
   lignesBilan.push('\nCETTE ACTION EST IRREVERSIBLE.');
   lignesBilan.push('La copie de sauvegarde Google Sheet est votre mecanisme de recuperation.');
@@ -396,12 +403,23 @@ function reinitialiserDonneesTestsAvecVerrou_() {
         feuille, spec.ligneDepart, nbLignes, spec.formulesProtegees
       );
 
+      // Détecter les valeurs fixes sans formule dans les plages protégées (avant tout effacement)
+      var adressesHistoriques = detecterValeursFixesDansProtegees_(
+        feuille, spec.ligneDepart, nbLignes, spec.formulesProtegees
+      );
+      var nbHistoriquesEffaces = adressesHistoriques.length;
+
       var plages = spec.plagesEffacer;
 
-      // Effacer les plages (clearContent préserve validations, formats, largeurs de colonne)
+      // Effacer les plages normales (clearContent préserve validations, formats, largeurs de colonne)
       for (var p = 0; p < plages.length; p++) {
         feuille.getRange(spec.ligneDepart, plages[p].col, nbLignes, plages[p].nbCols)
           .clearContent();
+      }
+
+      // Effacer les valeurs fixes historiques détectées (jamais les cellules avec formule)
+      if (nbHistoriquesEffaces > 0) {
+        feuille.getRangeList(adressesHistoriques).clearContent();
       }
 
       SpreadsheetApp.flush();
@@ -428,6 +446,16 @@ function reinitialiserDonneesTestsAvecVerrou_() {
         }
       }
 
+      // Vérifier qu'aucune valeur fixe historique ne subsiste dans les plages protégées
+      detecterValeursFixesDansProtegees_(
+        feuille, spec.ligneDepart, nbLignes, spec.formulesProtegees
+      ).forEach(function(adr) {
+        erreursOnglet.push(
+          spec.nom + ' ' + adr +
+          ' : valeur fixe historique encore presente apres clearContent'
+        );
+      });
+
       if (erreursOnglet.length > 0) {
         throw new Error(
           'Anomalies de verification (' + erreursOnglet.length + ') :\n' +
@@ -436,10 +464,12 @@ function reinitialiserDonneesTestsAvecVerrou_() {
       }
 
       var labelsEffaces = plages.map(function(pp) { return pp.label; }).join(', ');
-      bilanFinal.push(
-        '  ' + spec.nom + ' : ' + nbLignes +
-        ' ligne(s) effacee(s) — colonnes ' + labelsEffaces
-      );
+      var ligneBilanFinal = '  ' + spec.nom + ' : ' + nbLignes +
+        ' ligne(s) effacee(s) — colonnes ' + labelsEffaces;
+      if (nbHistoriquesEffaces > 0) {
+        ligneBilanFinal += ' + ' + nbHistoriquesEffaces + ' valeur(s) fixe(s) historique(s)';
+      }
+      bilanFinal.push(ligneBilanFinal);
       ongletsTraites.push(spec.nom);
 
     } catch (e) {
@@ -614,13 +644,18 @@ function executerAuditReinit_(ss) {
 
     // Compter les lignes avec données dans la colonne identifiant
     var lastRow = feuille.getLastRow();
+    var nbLignes = Math.max(0, lastRow - spec.ligneDepart + 1);
     var nbLignesDonnees = 0;
-    if (lastRow >= spec.ligneDepart) {
+    if (nbLignes > 0) {
       nbLignesDonnees = compterLignesAvecDonnees_(
-        feuille, spec.colId, spec.ligneDepart,
-        lastRow - spec.ligneDepart + 1
+        feuille, spec.colId, spec.ligneDepart, nbLignes
       );
     }
+
+    // Compter les valeurs fixes historiques dans les plages protégées marquées effacerValeursFixes
+    var nbValeursFixesHistoriques = detecterValeursFixesDansProtegees_(
+      feuille, spec.ligneDepart, nbLignes, spec.formulesProtegees
+    ).length;
 
     var labelsEffaces = spec.plagesEffacer
       ? spec.plagesEffacer.map(function(p) { return p.label; }).join(', ')
@@ -629,6 +664,7 @@ function executerAuditReinit_(ss) {
     rapport.ongletsReinitInfo.push({
       nom: spec.nom,
       nbLignesDonnees: nbLignesDonnees,
+      nbValeursFixesHistoriques: nbValeursFixesHistoriques,
       formulesProtegees: spec.formulesProtegees.map(function(fp) { return fp.label; }),
       colonnesEffacees: labelsEffaces
     });
@@ -800,6 +836,36 @@ function verifierPlagesEffacees_(feuille, ligneDepart, nbLignes, plages) {
   });
 
   return erreurs;
+}
+
+// Détecte les cellules à valeur fixe (sans formule) dans les plages protégées marquées
+// effacerValeursFixes: true. Ces valeurs sont des données historiques (ex. lignes annulées)
+// qui doivent être effacées sans toucher aux formules voisines.
+// Retourne un tableau de notations A1 (vide si aucune cellule concernée).
+function detecterValeursFixesDansProtegees_(feuille, ligneDepart, nbLignes, formulesProtegees) {
+  var adresses = [];
+  if (nbLignes <= 0 || !formulesProtegees || !formulesProtegees.length) return adresses;
+
+  formulesProtegees.forEach(function(fp) {
+    if (!fp.effacerValeursFixes) return;
+
+    var plage    = feuille.getRange(ligneDepart, fp.col, nbLignes, fp.nbCols);
+    var formulas = plage.getFormulas();
+    var values   = plage.getValues();
+
+    for (var i = 0; i < nbLignes; i++) {
+      for (var j = 0; j < fp.nbCols; j++) {
+        if (!formulas[i][j]) {
+          var v = values[i][j];
+          if (v !== '' && v !== null && v !== undefined) {
+            adresses.push(colLetter_(fp.col + j) + (ligneDepart + i));
+          }
+        }
+      }
+    }
+  });
+
+  return adresses;
 }
 
 // Produit une empreinte SHA-256 basée uniquement sur les formules d'un onglet dérivé.
