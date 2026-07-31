@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Arial, Helvetica, sans-serif;
+        color: #202124;
+        background: #f8f9fa;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: #f8f9fa;
+      }
+
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 22px;
+      }
+
+      h1 {
+        margin: 0 0 6px;
+        font-size: 26px;
+      }
+
+      .intro {
+        margin: 0 0 20px;
+        color: #5f6368;
+        line-height: 1.45;
+      }
+
+      .carte {
+        margin-bottom: 16px;
+        padding: 18px;
+        border: 1px solid #dadce0;
+        border-radius: 14px;
+        background: #fff;
+      }
+
+      .grille {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .champ-large {
+        grid-column: 1 / -1;
+      }
+
+      label.titre-champ {
+        display: block;
+        margin-bottom: 7px;
+        font-weight: 700;
+        font-size: 14px;
+      }
+
+      input[type="text"],
+      input[type="search"],
+      select,
+      textarea {
+        width: 100%;
+        min-height: 46px;
+        padding: 10px 12px;
+        border: 1px solid #bdc1c6;
+        border-radius: 8px;
+        background: #fff;
+        color: #202124;
+        font: inherit;
+      }
+
+      textarea {
+        min-height: 82px;
+        resize: vertical;
+      }
+
+      input:focus,
+      select:focus,
+      textarea:focus {
+        outline: 2px solid #1a73e8;
+        outline-offset: 1px;
+        border-color: #1a73e8;
+      }
+
+      .resume {
+        display: none;
+        margin-top: 14px;
+        padding: 14px;
+        border-radius: 10px;
+        background: #f1f3f4;
+      }
+
+      .resume.visible {
+        display: block;
+      }
+
+      .resume-ligne {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 5px 0;
+      }
+
+      .resume-ligne span:first-child {
+        color: #5f6368;
+      }
+
+      .resume-ligne strong {
+        text-align: right;
+      }
+
+      .etat-piece {
+        margin-top: 10px;
+        padding: 9px 11px;
+        border-radius: 8px;
+        font-weight: 700;
+      }
+
+      .etat-piece.requise {
+        color: #8a4b00;
+        background: #fef7e0;
+      }
+
+      .etat-piece.ok {
+        color: #0d652d;
+        background: #e6f4ea;
+      }
+
+      .choix-fichiers {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .entree-fichier {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+      }
+
+      .bouton-fichier {
+        display: flex;
+        min-height: 54px;
+        align-items: center;
+        justify-content: center;
+        padding: 11px 14px;
+        border: 1px solid #1a73e8;
+        border-radius: 9px;
+        color: #1558b0;
+        background: #fff;
+        font-weight: 700;
+        text-align: center;
+        cursor: pointer;
+      }
+
+      .bouton-fichier:hover {
+        background: #f3f7fe;
+      }
+
+      .fichier-selectionne {
+        min-height: 24px;
+        margin: 10px 0 0;
+        color: #3c4043;
+        font-size: 14px;
+        overflow-wrap: anywhere;
+      }
+
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      button {
+        min-height: 46px;
+        padding: 10px 18px;
+        border: 0;
+        border-radius: 8px;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.principal {
+        color: #fff;
+        background: #1a73e8;
+      }
+
+      button.secondaire {
+        color: #1558b0;
+        background: #e8f0fe;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .message {
+        display: none;
+        margin-bottom: 16px;
+        padding: 12px 14px;
+        border-radius: 9px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+      }
+
+      .message.visible {
+        display: block;
+      }
+
+      .message.info {
+        color: #174ea6;
+        background: #e8f0fe;
+      }
+
+      .message.succes {
+        color: #0d652d;
+        background: #e6f4ea;
+      }
+
+      .message.erreur {
+        color: #a50e0e;
+        background: #fce8e6;
+      }
+
+      .chargement {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        margin-right: 8px;
+        border: 2px solid rgba(255, 255, 255, 0.45);
+        border-top-color: #fff;
+        border-radius: 50%;
+        vertical-align: -3px;
+        animation: tourner 0.8s linear infinite;
+      }
+
+      @keyframes tourner {
+        to { transform: rotate(360deg); }
+      }
+
+      @media (max-width: 620px) {
+        main {
+          padding: 16px;
+        }
+
+        h1 {
+          font-size: 23px;
+        }
+
+        .grille,
+        .choix-fichiers {
+          grid-template-columns: 1fr;
+        }
+
+        .actions {
+          flex-direction: column-reverse;
+        }
+
+        button {
+          width: 100%;
+        }
+
+        .resume-ligne {
+          display: block;
+        }
+
+        .resume-ligne strong {
+          display: block;
+          margin-top: 2px;
+          text-align: left;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Ajouter une pièce justificative</h1>
+      <p class="intro">
+        Prenez une photo d’un reçu ou choisissez une facture. Le fichier sera
+        classé dans Google Drive et lié à la transaction comptable.
+      </p>
+
+      <div id="message" class="message" role="status" aria-live="polite"></div>
+
+      <form id="formPiece">
+        <section class="carte">
+          <div class="grille">
+            <div class="champ-large">
+              <label class="titre-champ" for="recherche">Rechercher</label>
+              <input
+                id="recherche"
+                type="search"
+                placeholder="Date, fournisseur, description ou identifiant"
+                autocomplete="off"
+              >
+            </div>
+
+            <div class="champ-large">
+              <label class="titre-champ" for="idTransaction">Transaction</label>
+              <select id="idTransaction" name="idTransaction" required disabled>
+                <option value="">Chargement des transactions…</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="resumeTransaction" class="resume">
+            <div class="resume-ligne">
+              <span>Date</span>
+              <strong id="resumeDate"></strong>
+            </div>
+            <div class="resume-ligne">
+              <span>Description</span>
+              <strong id="resumeDescription"></strong>
+            </div>
+            <div class="resume-ligne">
+              <span>Fournisseur ou contact</span>
+              <strong id="resumeFournisseur"></strong>
+            </div>
+            <div class="resume-ligne">
+              <span>Montant</span>
+              <strong id="resumeMontant"></strong>
+            </div>
+            <div id="etatPiece" class="etat-piece"></div>
+          </div>
+        </section>
+
+        <section class="carte">
+          <div class="grille">
+            <div>
+              <label class="titre-champ" for="typeDocument">Type de document</label>
+              <select id="typeDocument" name="typeDocument" required disabled></select>
+            </div>
+
+            <div>
+              <label class="titre-champ" for="nomDocument">Nom facultatif</label>
+              <input
+                id="nomDocument"
+                name="nomDocument"
+                type="text"
+                maxlength="160"
+                placeholder="Ex. Reçu du repas"
+              >
+            </div>
+
+            <div class="champ-large">
+              <label class="titre-champ">Photo ou fichier</label>
+              <div class="choix-fichiers">
+                <label class="bouton-fichier" for="photo">
+                  📷 Prendre une photo
+                </label>
+                <input
+                  id="photo"
+                  class="entree-fichier"
+                  name="photo"
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                >
+
+                <label class="bouton-fichier" for="fichier">
+                  📎 Choisir une image ou un PDF
+                </label>
+                <input
+                  id="fichier"
+                  class="entree-fichier"
+                  name="fichier"
+                  type="file"
+                  accept="image/jpeg,image/png,image/heic,image/heif,image/webp,application/pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,.pdf"
+                >
+              </div>
+              <p id="fichierSelectionne" class="fichier-selectionne">
+                Aucun fichier sélectionné.
+              </p>
+            </div>
+
+            <div class="champ-large">
+              <label class="titre-champ" for="notes">Notes facultatives</label>
+              <textarea
+                id="notes"
+                name="notes"
+                maxlength="500"
+                placeholder="Précision sur la facture ou le reçu…"
+              ></textarea>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="actualiser" class="secondaire" type="button">
+              Actualiser
+            </button>
+            <button id="enregistrer" class="principal" type="submit" disabled>
+              Enregistrer la pièce
+            </button>
+          </div>
+        </section>
+      </form>
+    </main>
+
+    <script>
+      'use strict';
+
+      let etat = {
+        transactions: [],
+        transactionsFiltrees: [],
+        transactionSelectionnee: null,
+        fichierSelectionne: null,
+        tailleMaxMo: 15,
+        chargement: false
+      };
+
+      const formatMonetaire = new Intl.NumberFormat('fr-CA', {
+        style: 'currency',
+        currency: 'CAD'
+      });
+
+      document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('formPiece').addEventListener(
+          'submit',
+          soumettreFormulaire
+        );
+        document.getElementById('actualiser').addEventListener(
+          'click',
+          chargerDonnees
+        );
+        document.getElementById('recherche').addEventListener(
+          'input',
+          filtrerTransactions
+        );
+        document.getElementById('idTransaction').addEventListener(
+          'change',
+          selectionnerTransaction
+        );
+        document.getElementById('photo').addEventListener(
+          'change',
+          function() { choisirFichier('photo', 'fichier'); }
+        );
+        document.getElementById('fichier').addEventListener(
+          'change',
+          function() { choisirFichier('fichier', 'photo'); }
+        );
+
+        chargerDonnees();
+      });
+
+      function chargerDonnees(conserverMessage) {
+        if (etat.chargement) {
+          return;
+        }
+
+        definirChargement(true, 'Chargement…');
+        if (!conserverMessage) {
+          afficherMessage('Chargement des transactions…', 'info');
+        }
+
+        google.script.run
+          .withSuccessHandler(function(donnees) {
+            etat.transactions = Array.isArray(donnees.transactions)
+              ? donnees.transactions
+              : [];
+            etat.tailleMaxMo = Number(donnees.tailleMaxMo || 15);
+            remplirTypes(donnees.typesDocuments || []);
+            filtrerTransactions();
+            definirChargement(false);
+
+            if (etat.transactions.length === 0) {
+              afficherMessage(
+                'Aucune transaction validée n’est disponible.',
+                'info'
+              );
+            } else if (!conserverMessage) {
+              masquerMessage();
+            }
+          })
+          .withFailureHandler(function(erreur) {
+            definirChargement(false);
+            afficherMessage(
+              erreur && erreur.message
+                ? erreur.message
+                : 'Impossible de charger les transactions.',
+              'erreur'
+            );
+          })
+          .obtenirDonneesCapturePiece();
+      }
+
+      function remplirTypes(types) {
+        const select = document.getElementById('typeDocument');
+        const valeurActuelle = select.value || 'Reçu';
+        select.textContent = '';
+
+        types.forEach(function(type) {
+          const option = document.createElement('option');
+          option.value = type;
+          option.textContent = type;
+          select.appendChild(option);
+        });
+
+        select.disabled = types.length === 0;
+        select.value = types.indexOf(valeurActuelle) !== -1
+          ? valeurActuelle
+          : (types[0] || '');
+      }
+
+      function filtrerTransactions() {
+        const recherche = normaliserTexte(
+          document.getElementById('recherche').value
+        );
+
+        etat.transactionsFiltrees = etat.transactions.filter(function(tx) {
+          if (!recherche) {
+            return true;
+          }
+
+          return normaliserTexte([
+            tx.id,
+            tx.date,
+            tx.description,
+            tx.fournisseur,
+            tx.contact,
+            tx.referenceBancaire
+          ].join(' ')).indexOf(recherche) !== -1;
+        });
+
+        remplirTransactions();
+      }
+
+      function remplirTransactions() {
+        const select = document.getElementById('idTransaction');
+        const ancienneValeur = select.value;
+        select.textContent = '';
+
+        const optionVide = document.createElement('option');
+        optionVide.value = '';
+        optionVide.textContent = etat.transactionsFiltrees.length
+          ? 'Sélectionner une transaction…'
+          : 'Aucune transaction trouvée';
+        select.appendChild(optionVide);
+
+        etat.transactionsFiltrees.forEach(function(tx) {
+          const option = document.createElement('option');
+          const indicateur = tx.pieceRequise ? '⚠ ' : '✓ ';
+          option.value = tx.id;
+          option.textContent = indicateur + tx.date + ' — ' +
+            tx.description + ' — ' + formatMonetaire.format(tx.montant);
+          select.appendChild(option);
+        });
+
+        select.disabled = etat.transactionsFiltrees.length === 0;
+
+        const encorePresente = etat.transactionsFiltrees.some(function(tx) {
+          return tx.id === ancienneValeur;
+        });
+
+        select.value = encorePresente ? ancienneValeur : '';
+        selectionnerTransaction();
+      }
+
+      function selectionnerTransaction() {
+        const id = document.getElementById('idTransaction').value;
+        etat.transactionSelectionnee = etat.transactions.find(function(tx) {
+          return tx.id === id;
+        }) || null;
+
+        afficherResumeTransaction();
+        actualiserBoutonEnregistrer();
+      }
+
+      function afficherResumeTransaction() {
+        const resume = document.getElementById('resumeTransaction');
+        const tx = etat.transactionSelectionnee;
+
+        if (!tx) {
+          resume.classList.remove('visible');
+          return;
+        }
+
+        document.getElementById('resumeDate').textContent = tx.date;
+        document.getElementById('resumeDescription').textContent = tx.description;
+        document.getElementById('resumeFournisseur').textContent =
+          tx.fournisseur || tx.contact || '(Non précisé)';
+        document.getElementById('resumeMontant').textContent =
+          formatMonetaire.format(tx.montant);
+
+        const etatPiece = document.getElementById('etatPiece');
+        etatPiece.className = 'etat-piece ' +
+          (tx.pieceRequise ? 'requise' : 'ok');
+        etatPiece.textContent = tx.pieceRequise
+          ? 'Pièce requise'
+          : 'Une pièce est déjà liée; vous pouvez en ajouter une autre.';
+        resume.classList.add('visible');
+      }
+
+      function choisirFichier(idSource, idAutre) {
+        const source = document.getElementById(idSource);
+        const autre = document.getElementById(idAutre);
+        const fichier = source.files && source.files[0]
+          ? source.files[0]
+          : null;
+
+        if (fichier) {
+          autre.value = '';
+          etat.fichierSelectionne = fichier;
+          document.getElementById('fichierSelectionne').textContent =
+            fichier.name + ' — ' + formaterTaille(fichier.size);
+
+          if (fichier.size > etat.tailleMaxMo * 1024 * 1024) {
+            afficherMessage(
+              'Le fichier dépasse la limite de ' + etat.tailleMaxMo + ' Mo.',
+              'erreur'
+            );
+          } else {
+            masquerMessage();
+          }
+        } else {
+          etat.fichierSelectionne = null;
+          document.getElementById('fichierSelectionne').textContent =
+            'Aucun fichier sélectionné.';
+        }
+
+        actualiserBoutonEnregistrer();
+      }
+
+      function soumettreFormulaire(evenement) {
+        evenement.preventDefault();
+
+        if (
+          etat.chargement ||
+          !etat.transactionSelectionnee ||
+          !etat.fichierSelectionne
+        ) {
+          return;
+        }
+
+        if (etat.fichierSelectionne.size > etat.tailleMaxMo * 1024 * 1024) {
+          afficherMessage(
+            'Le fichier dépasse la limite de ' + etat.tailleMaxMo + ' Mo.',
+            'erreur'
+          );
+          return;
+        }
+
+        definirChargement(true, 'Enregistrement…');
+        afficherMessage(
+          'Téléversement et synchronisation en cours…',
+          'info'
+        );
+
+        google.script.run
+          .withSuccessHandler(function(resultat) {
+            afficherMessage(
+              'Pièce enregistrée avec succès.\n' +
+              'Document : ' + resultat.idDocument + '\n' +
+              'Transaction : ' + resultat.idTransaction + '\n' +
+              'Contrôle : ' + resultat.controlePiece,
+              'succes'
+            );
+            reinitialiserFichiers();
+            definirChargement(false);
+            chargerDonnees(true);
+          })
+          .withFailureHandler(function(erreur) {
+            definirChargement(false);
+            afficherMessage(
+              erreur && erreur.message
+                ? erreur.message
+                : 'L’enregistrement de la pièce a échoué.',
+              'erreur'
+            );
+          })
+          .enregistrerPieceJustificative(document.getElementById('formPiece'));
+      }
+
+      function reinitialiserFichiers() {
+        document.getElementById('photo').value = '';
+        document.getElementById('fichier').value = '';
+        document.getElementById('nomDocument').value = '';
+        document.getElementById('notes').value = '';
+        document.getElementById('fichierSelectionne').textContent =
+          'Aucun fichier sélectionné.';
+        etat.fichierSelectionne = null;
+      }
+
+      function definirChargement(chargement, texteBouton) {
+        etat.chargement = chargement;
+        const bouton = document.getElementById('enregistrer');
+        document.getElementById('actualiser').disabled = chargement;
+
+        if (chargement) {
+          bouton.textContent = '';
+          const indicateur = document.createElement('span');
+          indicateur.className = 'chargement';
+          bouton.appendChild(indicateur);
+          bouton.appendChild(document.createTextNode(texteBouton || 'Traitement…'));
+        } else {
+          bouton.textContent = 'Enregistrer la pièce';
+        }
+
+        actualiserBoutonEnregistrer();
+      }
+
+      function actualiserBoutonEnregistrer() {
+        const bouton = document.getElementById('enregistrer');
+        const fichierValide = etat.fichierSelectionne &&
+          etat.fichierSelectionne.size <= etat.tailleMaxMo * 1024 * 1024;
+        bouton.disabled = Boolean(
+          etat.chargement ||
+          !etat.transactionSelectionnee ||
+          !fichierValide
+        );
+      }
+
+      function afficherMessage(texte, type) {
+        const element = document.getElementById('message');
+        element.textContent = texte;
+        element.className = 'message visible ' + type;
+      }
+
+      function masquerMessage() {
+        const element = document.getElementById('message');
+        element.textContent = '';
+        element.className = 'message';
+      }
+
+      function normaliserTexte(valeur) {
+        return String(valeur || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
+      function formaterTaille(octets) {
+        if (octets < 1024 * 1024) {
+          return Math.max(1, Math.round(octets / 1024)) + ' Ko';
+        }
+
+        return (octets / 1024 / 1024).toFixed(1).replace('.', ',') + ' Mo';
+      }
+    </script>
+  </body>
+</html>

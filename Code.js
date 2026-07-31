@@ -52,6 +52,18 @@ function onOpen() {
       'installerRapportDepensesFournisseurs'
     )
     .addSeparator()
+    .addSubMenu(
+      SpreadsheetApp.getUi().createMenu('Pièces justificatives')
+        .addItem(
+          'Ajouter une pièce justificative',
+          'ouvrirCapturePieceJustificative'
+        )
+        .addItem(
+          'Installer la capture mobile',
+          'installerGestionPiecesJustificatives'
+        )
+    )
+    .addSeparator()
     .addItem(
       'Initialiser les dossiers Drive',
       'initialiserDossiersDrive'
