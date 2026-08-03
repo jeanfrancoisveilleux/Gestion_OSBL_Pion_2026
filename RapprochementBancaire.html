@@ -232,6 +232,97 @@
         animation: tourner .7s linear infinite;
         flex-shrink: 0;
       }
+
+      /* ── Bouton Vérifier (dans le tableau) ── */
+      button.verifier {
+        min-height: 30px;
+        padding: 4px 10px;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      /* ── Panneau d'audit de clôture ── */
+      .panneau-audit {
+        display: none;
+        margin-top: 20px;
+        padding: 18px 20px 20px;
+        border: 2px solid var(--gris-300);
+        border-radius: 10px;
+        background: var(--gris-050);
+      }
+
+      .panneau-audit.visible { display: block; }
+
+      .panneau-audit-entete {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+        flex-wrap: wrap;
+      }
+
+      .panneau-audit h2 {
+        font-size: 16px;
+        font-weight: 700;
+        margin: 0 0 8px;
+      }
+
+      .verdict {
+        display: inline-block;
+        padding: 5px 14px;
+        border-radius: 14px;
+        font-weight: 700;
+        font-size: 14px;
+      }
+
+      .verdict.admissible   { background: var(--vert-pale);  color: var(--vert); }
+      .verdict.non-admissible { background: var(--rouge-pale); color: var(--rouge); }
+      .verdict.en-cours     { background: var(--gris-100);   color: var(--gris-600); }
+
+      .table-controles {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      .table-controles th {
+        text-align: left;
+        padding: 8px 10px;
+        background: var(--bleu-pale);
+        border-bottom: 2px solid var(--gris-300);
+        font-weight: 700;
+      }
+
+      .table-controles td {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--gris-100);
+        vertical-align: top;
+      }
+
+      .table-controles tbody tr:last-child td { border-bottom: none; }
+
+      .indicateur {
+        font-weight: 700;
+        white-space: nowrap;
+        font-size: 13px;
+      }
+
+      .indicateur.ok    { color: var(--vert); }
+      .indicateur.echec { color: var(--rouge); }
+
+      .detail-controle {
+        font-size: 11px;
+        color: var(--gris-600);
+        margin-top: 3px;
+        word-break: break-all;
+      }
+
+      @media (max-width: 600px) {
+        .panneau-audit { padding: 12px 12px 16px; }
+        .table-controles th:nth-child(3),
+        .table-controles td:nth-child(3) { display: none; }
+      }
     </style>
   </head>
   <body>
@@ -253,6 +344,28 @@
 
       <div id="cartes" class="cartes"></div>
 
+      <div id="panneauAudit" class="panneau-audit" role="region" aria-label="Résultat de l'audit de clôture">
+        <div class="panneau-audit-entete">
+          <div>
+            <h2 id="panneauAuditTitre"></h2>
+            <span id="panneauAuditVerdict" class="verdict"></span>
+          </div>
+          <button id="btnFermerPanneau" type="button">✕ Fermer</button>
+        </div>
+        <div class="conteneur-tableau">
+          <table class="table-controles">
+            <thead>
+              <tr>
+                <th>Résultat</th>
+                <th>Contrôle</th>
+                <th>Valeur / Détail</th>
+              </tr>
+            </thead>
+            <tbody id="corpsControles"></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="conteneur-tableau">
         <table id="tableau">
           <thead>
@@ -268,6 +381,7 @@
               <th class="centre">À&nbsp;classer</th>
               <th class="droite">Écart</th>
               <th>Statut</th>
+              <th class="centre">Vérification</th>
             </tr>
           </thead>
           <tbody id="corpsTableau"></tbody>
@@ -303,6 +417,10 @@
 
         elements.btnActualiser.addEventListener('click', function() {
           actualiser();
+        });
+
+        document.getElementById('btnFermerPanneau').addEventListener('click', function() {
+          fermerPanneauAudit();
         });
 
         google.script.run
@@ -469,7 +587,7 @@
         if (lignes.length === 0) {
           var tr = document.createElement('tr');
           var td = document.createElement('td');
-          td.colSpan = 11;
+          td.colSpan = 12;
           td.className = 'vide';
           td.textContent = 'Aucune donnée pour cette année. Cliquez sur « Actualiser » pour calculer.';
           tr.appendChild(td);
@@ -531,6 +649,20 @@
           tdS.appendChild(pastille);
           tr.appendChild(tdS);
 
+          // Vérifier la clôture
+          var tdVerif = document.createElement('td');
+          tdVerif.className = 'centre';
+          var btnVerif = document.createElement('button');
+          btnVerif.type = 'button';
+          btnVerif.className = 'verifier';
+          btnVerif.textContent = 'Vérifier la clôture';
+          btnVerif.dataset.cleMois = l.cle;
+          btnVerif.addEventListener('click', (function(cle, btn) {
+            return function() { verifierCloture(cle, btn); };
+          })(l.cle, btnVerif));
+          tdVerif.appendChild(btnVerif);
+          tr.appendChild(tdVerif);
+
           elements.corpsTableau.appendChild(tr);
         });
       }
@@ -563,6 +695,99 @@
         }
 
         tr.appendChild(td);
+      }
+
+      // ── Audit de clôture mensuelle ───────────────────────────────────────────
+      function verifierCloture(cleMois, bouton) {
+        bouton.disabled = true;
+        var texteOriginal = bouton.textContent;
+        bouton.textContent = '…';
+
+        afficherAuditEnChargement(cleMois);
+
+        google.script.run
+          .withSuccessHandler(function(resultat) {
+            afficherPanneauAudit(resultat);
+            bouton.disabled = false;
+            bouton.textContent = texteOriginal;
+          })
+          .withFailureHandler(function(erreur) {
+            afficherMessage(obtenirMessageErreur(erreur), 'erreur');
+            fermerPanneauAudit();
+            bouton.disabled = false;
+            bouton.textContent = texteOriginal;
+          })
+          .auditerClotureMoisComptable(cleMois);
+      }
+
+      function afficherAuditEnChargement(cleMois) {
+        var panneau = document.getElementById('panneauAudit');
+        var titre = document.getElementById('panneauAuditTitre');
+        var verdict = document.getElementById('panneauAuditVerdict');
+        var corps = document.getElementById('corpsControles');
+
+        titre.textContent = 'Vérification en cours — ' + cleMois + '…';
+        verdict.textContent = 'Calcul en cours';
+        verdict.className = 'verdict en-cours';
+        corps.innerHTML = '';
+        panneau.className = 'panneau-audit visible';
+        panneau.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+
+      function afficherPanneauAudit(resultat) {
+        var panneau = document.getElementById('panneauAudit');
+        var titre = document.getElementById('panneauAuditTitre');
+        var verdict = document.getElementById('panneauAuditVerdict');
+        var corps = document.getElementById('corpsControles');
+
+        titre.textContent = 'Audit de clôture — ' + resultat.libelleMois;
+
+        if (resultat.admissible) {
+          verdict.textContent = 'Admissible à la clôture';
+          verdict.className = 'verdict admissible';
+        } else {
+          verdict.textContent = 'Non admissible';
+          verdict.className = 'verdict non-admissible';
+        }
+
+        corps.innerHTML = '';
+
+        resultat.controles.forEach(function(c) {
+          var tr = document.createElement('tr');
+
+          var tdIndicateur = document.createElement('td');
+          var indicateur = document.createElement('span');
+          indicateur.className = 'indicateur ' + (c.ok ? 'ok' : 'echec');
+          indicateur.textContent = c.ok ? '✓ OK' : '✗ Échec';
+          tdIndicateur.appendChild(indicateur);
+          tr.appendChild(tdIndicateur);
+
+          var tdLibelle = document.createElement('td');
+          tdLibelle.textContent = c.libelle;
+          tr.appendChild(tdLibelle);
+
+          var tdDetail = document.createElement('td');
+          var valeurSpan = document.createElement('span');
+          valeurSpan.textContent = c.valeur || '';
+          tdDetail.appendChild(valeurSpan);
+
+          if (c.detail) {
+            var detailDiv = document.createElement('div');
+            detailDiv.className = 'detail-controle';
+            detailDiv.textContent = c.detail;
+            tdDetail.appendChild(detailDiv);
+          }
+
+          tr.appendChild(tdDetail);
+          corps.appendChild(tr);
+        });
+
+        panneau.className = 'panneau-audit visible';
+        panneau.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+
+      function fermerPanneauAudit() {
+        document.getElementById('panneauAudit').className = 'panneau-audit';
       }
 
       // ── Utilitaires ──────────────────────────────────────────────────────────
