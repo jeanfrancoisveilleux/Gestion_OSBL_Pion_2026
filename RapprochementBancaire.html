@@ -195,10 +195,12 @@
         white-space: nowrap;
       }
 
-      .pastille.a-completer { background: var(--orange-pale); color: var(--orange); }
-      .pastille.a-verifier  { background: var(--rouge-pale);  color: var(--rouge); }
-      .pastille.pret        { background: var(--vert-pale);   color: var(--vert); }
-      .pastille.vide        { background: var(--gris-100);    color: var(--gris-600); }
+      .pastille.a-completer        { background: var(--orange-pale); color: var(--orange); }
+      .pastille.a-verifier         { background: var(--rouge-pale);  color: var(--rouge); }
+      .pastille.pret               { background: var(--vert-pale);   color: var(--vert); }
+      .pastille.rapproche          { background: #c8e6c9; color: #1b5e20; }
+      .pastille.rapproche-anomalie { background: var(--rouge-pale); color: var(--rouge); }
+      .pastille.vide               { background: var(--gris-100);    color: var(--gris-600); }
 
       /* ── Vide ── */
       .vide {
@@ -318,6 +320,71 @@
         word-break: break-all;
       }
 
+      /* ── Section actions du panneau d'audit ── */
+      .panneau-actions {
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--gris-300);
+      }
+
+      .panneau-actions label {
+        display: block;
+        font-weight: 700;
+        font-size: 13px;
+        margin-bottom: 5px;
+      }
+
+      .panneau-actions textarea {
+        width: 100%;
+        min-height: 52px;
+        max-height: 120px;
+        padding: 7px 10px;
+        border: 1px solid var(--gris-300);
+        border-radius: 7px;
+        font: inherit;
+        font-size: 13px;
+        resize: vertical;
+        margin-bottom: 10px;
+        box-sizing: border-box;
+      }
+
+      .panneau-actions textarea:focus {
+        border-color: var(--bleu);
+        outline: 2px solid rgba(26,115,232,.18);
+      }
+
+      .info-cloture {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        background: #c8e6c9;
+        color: #1b5e20;
+        border-radius: 7px;
+        font-weight: 600;
+        font-size: 13px;
+      }
+
+      button.btn-fermer {
+        background: var(--bleu);
+        color: #fff;
+        border-color: var(--bleu);
+      }
+
+      button.btn-fermer:hover { background: var(--bleu-fonce); }
+
+      button.btn-rouvrir {
+        background: #fff;
+        color: var(--rouge);
+        border-color: var(--rouge);
+      }
+
+      button.btn-rouvrir:hover { background: var(--rouge-pale); }
+
+      .date-cloture {
+        font-size: 11px;
+        color: var(--gris-600);
+        margin-bottom: 4px;
+      }
+
       @media (max-width: 600px) {
         .panneau-audit { padding: 12px 12px 16px; }
         .table-controles th:nth-child(3),
@@ -364,6 +431,7 @@
             <tbody id="corpsControles"></tbody>
           </table>
         </div>
+        <div id="panneauActionsCloture" class="panneau-actions" style="display:none"></div>
       </div>
 
       <div class="conteneur-tableau">
@@ -649,13 +717,21 @@
           tdS.appendChild(pastille);
           tr.appendChild(tdS);
 
-          // Vérifier la clôture
+          // Vérification / Réouverture
           var tdVerif = document.createElement('td');
           tdVerif.className = 'centre';
+          if (l.estCloture && l.dateRapprochement) {
+            var dateDiv = document.createElement('div');
+            dateDiv.className = 'date-cloture';
+            dateDiv.textContent = 'Clôturé le ' + l.dateRapprochement;
+            tdVerif.appendChild(dateDiv);
+          }
           var btnVerif = document.createElement('button');
           btnVerif.type = 'button';
           btnVerif.className = 'verifier';
-          btnVerif.textContent = 'Vérifier la clôture';
+          btnVerif.textContent = l.estCloture
+            ? 'Réouvrir le mois'
+            : 'Vérifier la clôture';
           btnVerif.dataset.cleMois = l.cle;
           btnVerif.addEventListener('click', (function(cle, btn) {
             return function() { verifierCloture(cle, btn); };
@@ -668,6 +744,8 @@
       }
 
       function classeStatut(statut) {
+        if (statut === 'Rapproché') { return 'rapproche'; }
+        if (statut === 'Rapproché — anomalie') { return 'rapproche-anomalie'; }
         if (statut === 'Prêt à rapprocher') { return 'pret'; }
         if (statut === 'À vérifier') { return 'a-verifier'; }
         if (statut === 'À compléter') { return 'a-completer'; }
@@ -740,9 +818,15 @@
         var verdict = document.getElementById('panneauAuditVerdict');
         var corps = document.getElementById('corpsControles');
 
-        titre.textContent = 'Audit de clôture — ' + resultat.libelleMois;
+        var estClotureTitre = Boolean(resultat.dateRapprochement);
+        titre.textContent = estClotureTitre
+          ? 'Mois clôturé — ' + resultat.libelleMois
+          : 'Audit de clôture — ' + resultat.libelleMois;
 
-        if (resultat.admissible) {
+        if (estClotureTitre) {
+          verdict.textContent = 'Clôturé le ' + resultat.dateRapprochement;
+          verdict.className = 'verdict admissible';
+        } else if (resultat.admissible) {
           verdict.textContent = 'Admissible à la clôture';
           verdict.className = 'verdict admissible';
         } else {
@@ -783,11 +867,127 @@
         });
 
         panneau.className = 'panneau-audit visible';
+
+        // Section actions (Fermer le mois / Réouvrir le mois)
+        var panneauActions = document.getElementById('panneauActionsCloture');
+        panneauActions.innerHTML = '';
+        panneauActions.style.display = 'none';
+
+        var estCloture = Boolean(resultat.dateRapprochement);
+
+        if (estCloture) {
+          // Afficher la section Réouverture
+          var infoDiv = document.createElement('div');
+          infoDiv.className = 'info-cloture';
+          infoDiv.textContent =
+            'Ce mois est clôturé le ' + resultat.dateRapprochement + '.';
+          panneauActions.appendChild(infoDiv);
+
+          var labelMotif = document.createElement('label');
+          labelMotif.textContent = 'Motif de réouverture (obligatoire) :';
+          panneauActions.appendChild(labelMotif);
+
+          var inputMotif = document.createElement('textarea');
+          inputMotif.placeholder = 'Décrivez la raison de la réouverture…';
+          panneauActions.appendChild(inputMotif);
+
+          var btnRouv = document.createElement('button');
+          btnRouv.type = 'button';
+          btnRouv.className = 'btn-rouvrir';
+          btnRouv.textContent = 'Réouvrir le mois';
+          btnRouv.addEventListener('click', (function(cle, lib, inp, btn) {
+            return function() {
+              var motif = inp.value.trim();
+              if (!motif) {
+                alert('Le motif de réouverture est obligatoire.');
+                inp.focus();
+                return;
+              }
+              if (!confirm(
+                'Confirmer la réouverture de ' + lib + ' ?\n\n' +
+                'Motif : ' + motif
+              )) { return; }
+              reouvrirMois(cle, motif, btn);
+            };
+          })(resultat.cleMois, resultat.libelleMois, inputMotif, btnRouv));
+          panneauActions.appendChild(btnRouv);
+          panneauActions.style.display = '';
+
+        } else if (resultat.admissible) {
+          // Afficher la section Fermeture
+          var labelNote = document.createElement('label');
+          labelNote.textContent = 'Note de clôture (facultative) :';
+          panneauActions.appendChild(labelNote);
+
+          var inputNote = document.createElement('textarea');
+          inputNote.placeholder = 'Note optionnelle…';
+          panneauActions.appendChild(inputNote);
+
+          var btnFermer = document.createElement('button');
+          btnFermer.type = 'button';
+          btnFermer.className = 'btn-fermer';
+          btnFermer.textContent = 'Fermer le mois';
+          btnFermer.addEventListener('click', (function(cle, lib, inp, btn) {
+            return function() {
+              var note = inp.value.trim();
+              if (!confirm(
+                'Confirmer la clôture de ' + lib + ' ?' +
+                (note ? '\n\nNote : ' + note : '') +
+                '\n\nCette action peut être annulée en réouvrant le mois.'
+              )) { return; }
+              fermerMois(cle, note, btn);
+            };
+          })(resultat.cleMois, resultat.libelleMois, inputNote, btnFermer));
+          panneauActions.appendChild(btnFermer);
+          panneauActions.style.display = '';
+        }
+
         panneau.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+
+      function fermerMois(cleMois, note, bouton) {
+        bouton.disabled = true;
+        google.script.run
+          .withSuccessHandler(function(res) {
+            chargerEtat(res.donnees);
+            afficherMessage(
+              'Le mois ' + res.libelleMois + ' a été clôturé.',
+              'succes'
+            );
+            fermerPanneauAudit();
+            bouton.disabled = false;
+          })
+          .withFailureHandler(function(erreur) {
+            afficherMessage(obtenirMessageErreur(erreur), 'erreur');
+            bouton.disabled = false;
+          })
+          .fermerMoisComptable(cleMois, note);
+      }
+
+      function reouvrirMois(cleMois, motif, bouton) {
+        bouton.disabled = true;
+        google.script.run
+          .withSuccessHandler(function(res) {
+            chargerEtat(res.donnees);
+            afficherMessage(
+              'Le mois ' + res.libelleMois + ' a été réouvert.',
+              'succes'
+            );
+            fermerPanneauAudit();
+            bouton.disabled = false;
+          })
+          .withFailureHandler(function(erreur) {
+            afficherMessage(obtenirMessageErreur(erreur), 'erreur');
+            bouton.disabled = false;
+          })
+          .reouvrirMoisComptable(cleMois, motif);
       }
 
       function fermerPanneauAudit() {
         document.getElementById('panneauAudit').className = 'panneau-audit';
+        var pa = document.getElementById('panneauActionsCloture');
+        pa.innerHTML = '';
+        pa.style.display = 'none';
       }
 
       // ── Utilitaires ──────────────────────────────────────────────────────────

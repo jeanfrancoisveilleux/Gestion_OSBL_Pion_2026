@@ -147,6 +147,33 @@ function importerCsvDesjardins(contenu, nomFichier) {
     };
   }
 
+  // Acquérir le verrou avant la vérification de période pour garantir
+  // l'atomicité : fermerMoisComptable ne peut pas s'intercaler entre
+  // la vérification et setValues.
+  const verrou = LockService.getDocumentLock();
+  if (!verrou.tryLock(30000)) {
+    throw new Error(
+      'Une autre opération est déjà en cours. ' +
+      'Réessayez dans quelques secondes.'
+    );
+  }
+
+  try {
+
+  // Refus complet si l'un des relevés appartient à un mois clôturé.
+  // Toutes les nouvelles lignes (non doublons) sont vérifiées avant tout setValues.
+  const moisVerifies = {};
+  nouvellesLignes.forEach(function(ligne) {
+    const dateLigne = ligne[1];
+    if (!(dateLigne instanceof Date)) return;
+    const tz = classeur.getSpreadsheetTimeZone();
+    const cle = Utilities.formatDate(dateLigne, tz, 'yyyy-MM');
+    if (!moisVerifies[cle]) {
+      moisVerifies[cle] = true;
+      verifierPeriodeComptableOuverte_(classeur, dateLigne, 'importer des transactions bancaires');
+    }
+  });
+
   const ligneDepart = feuille.getLastRow() + 1;
   const ligneFinale =
     ligneDepart + nouvellesLignes.length - 1;
@@ -245,6 +272,10 @@ function importerCsvDesjardins(contenu, nomFichier) {
     avertissementRegles: resultRegles.avertissement || null,
     conflitsRegles: resultRegles.conflits || []
   };
+
+  } finally {
+    verrou.releaseLock();
+  }
 }
 
 function convertirMontantCsv_(valeur) {

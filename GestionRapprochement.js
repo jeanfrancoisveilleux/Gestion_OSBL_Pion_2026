@@ -122,7 +122,8 @@ function obtenirDonneesRapprochementBancaire() {
       ecart: Number(ligne[9] || 0),
       statut: String(ligne[10] || '').trim(),
       dateRapprochement: formaterDateRappr_(ligne[11]),
-      notes: String(ligne[12] || '')
+      notes: String(ligne[12] || ''),
+      estCloture: ligne[11] instanceof Date && !isNaN(ligne[11].getTime())
     });
   });
 
@@ -150,7 +151,6 @@ function actualiserRapprochementBancaire() {
 }
 
 function auditerClotureMoisComptable(cleMois) {
-  // 1. Validation du format YYYY-MM
   const cleStr = String(cleMois || '').trim();
 
   if (!cleStr.match(/^\d{4}-\d{2}$/)) {
@@ -160,12 +160,203 @@ function auditerClotureMoisComptable(cleMois) {
     );
   }
 
+  const verrou = LockService.getDocumentLock();
+
+  if (!verrou.tryLock(30000)) {
+    throw new Error(
+      'Une autre opération est déjà en cours. ' +
+      'Réessayez dans quelques secondes.'
+    );
+  }
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    return auditerClotureMoisComptableSansVerrou_(ss, cleStr);
+  } finally {
+    verrou.releaseLock();
+  }
+}
+
+// Effectue le recalcul et retourne le résultat de l'audit sans acquérir de verrou.
+// Appelé par auditerClotureMoisComptable, fermerMoisComptable et reouvrirMoisComptable.
+function auditerClotureMoisComptableSansVerrou_(ss, cleStr) {
   const parties = cleStr.split('-');
   const annee = Number(parties[0]);
   const mois = Number(parties[1]);
   const libelleMois = libelleMoisRappr_(annee, mois);
 
-  // 2. Verrou documentaire
+  // 1. Préparer l'onglet et recalculer
+  preparerOngletRapprochement_(ss);
+  calculerEtEcrireRapprochement_(ss);
+
+  // 2. Lire les données recalculées
+  const donnees = obtenirDonneesRapprochementBancaire();
+  const ligneMois = donnees.lignes.filter(function(l) {
+    return l.cle === cleStr;
+  })[0] || null;
+
+  // 3. Construire les contrôles
+  const controles = [];
+
+  // PERIODE_EXISTANTE
+  const periodeExiste = ligneMois !== null;
+  controles.push({
+    code: 'PERIODE_EXISTANTE',
+    libelle: 'Période présente dans le rapprochement',
+    ok: periodeExiste,
+    valeur: periodeExiste ? 'Oui' : 'Non',
+    detail: periodeExiste
+      ? null
+      : 'Le mois ' + cleStr +
+        ' ne figure pas dans les données recalculées. ' +
+        'Vérifiez que des transactions existent dans Import bancaire pour ce mois.'
+  });
+
+  if (!periodeExiste) {
+    return {
+      cleMois: cleStr,
+      libelleMois: libelleMois,
+      admissible: false,
+      dateRapprochement: '',
+      notes: '',
+      controles: controles
+    };
+  }
+
+  // IMPORT_CLASSE
+  const aClasser = ligneMois.transactionsAClasser;
+  controles.push({
+    code: 'IMPORT_CLASSE',
+    libelle: 'Transactions bancaires classées',
+    ok: aClasser === 0,
+    valeur: aClasser === 0
+      ? 'Toutes classées'
+      : aClasser + ' transaction(s) encore à classer',
+    detail: null
+  });
+
+  // JOURNAL_EQUILIBRE
+  const journalEq = ligneMois.journalEquilibre;
+  controles.push({
+    code: 'JOURNAL_EQUILIBRE',
+    libelle: 'Journal comptable équilibré',
+    ok: journalEq,
+    valeur: journalEq ? 'Équilibré' : 'Non équilibré',
+    detail: journalEq
+      ? null
+      : 'La somme des débits ne correspond pas à la somme des crédits pour ce mois.'
+  });
+
+  // ECRITURES_LIEES
+  const sansLien = ligneMois.ecritures1000SansLien;
+  controles.push({
+    code: 'ECRITURES_LIEES',
+    libelle: 'Écritures compte 1000 liées à une transaction bancaire',
+    ok: sansLien === 0,
+    valeur: sansLien === 0
+      ? 'Toutes liées'
+      : sansLien + ' écriture(s) sans lien bancaire',
+    detail: null
+  });
+
+  // SOLDE_CONCORDE
+  const ecart = ligneMois.ecart;
+  const soldeConcorde = Math.abs(ecart) < CONFIG_RAPPROCHEMENT.TOLERANCE;
+  controles.push({
+    code: 'SOLDE_CONCORDE',
+    libelle: 'Solde bancaire concordant avec le solde comptable 1000',
+    ok: soldeConcorde,
+    valeur: 'Écart : ' +
+      (ecart >= 0 ? '+' : '') +
+      ecart.toFixed(2) + ' $',
+    detail: soldeConcorde
+      ? null
+      : 'L\'écart dépasse la tolérance de ' +
+        CONFIG_RAPPROCHEMENT.TOLERANCE + ' $. ' +
+        'Solde bancaire fin : ' + ligneMois.soldeBancaireFin.toFixed(2) +
+        ' $ — Solde comptable : ' + ligneMois.soldeComptable.toFixed(2) + ' $.'
+  });
+
+  // PIECES_DEPENSES
+  const depenses = chargerDepensesMois_Rappr_(ss, cleStr);
+  const depensesSansPiece = depenses.filter(function(d) {
+    return d.pieceCtrl !== 'OK';
+  });
+  const LIMITE_DETAIL = 20;
+  var detailPieces = null;
+
+  if (depensesSansPiece.length > 0) {
+    var ids = depensesSansPiece
+      .slice(0, LIMITE_DETAIL)
+      .map(function(d) { return d.idTransaction; })
+      .join(', ');
+
+    if (depensesSansPiece.length > LIMITE_DETAIL) {
+      ids += ' … (+' + (depensesSansPiece.length - LIMITE_DETAIL) + ' autres)';
+    }
+
+    detailPieces = ids;
+  }
+
+  controles.push({
+    code: 'PIECES_DEPENSES',
+    libelle: 'Pièces justificatives des dépenses',
+    ok: depensesSansPiece.length === 0,
+    valeur: depenses.length === 0
+      ? 'Aucune dépense ce mois'
+      : depensesSansPiece.length === 0
+        ? 'Toutes les dépenses (' + depenses.length + ') ont une pièce'
+        : depensesSansPiece.length + ' dépense(s) sur ' + depenses.length + ' sans pièce',
+    detail: detailPieces
+  });
+
+  // MOIS_PRECEDENTS_CLOTURES
+  const moisPrecedentsOuverts = [];
+  const estPremierMois =
+    (annee === CONFIG_RAPPROCHEMENT.ANNEE_DEBUT && mois === 1);
+
+  if (!estPremierMois) {
+    donnees.lignes.forEach(function(l) {
+      if (l.cle < cleStr && !l.estCloture) {
+        moisPrecedentsOuverts.push(l.libelle);
+      }
+    });
+  }
+
+  controles.push({
+    code: 'MOIS_PRECEDENTS_CLOTURES',
+    libelle: 'Mois précédents clôturés',
+    ok: moisPrecedentsOuverts.length === 0,
+    valeur: moisPrecedentsOuverts.length === 0
+      ? (estPremierMois ? 'Aucun mois précédent' : 'Tous clôturés')
+      : moisPrecedentsOuverts.length + ' mois précédent(s) non clôturé(s)',
+    detail: moisPrecedentsOuverts.length > 0
+      ? moisPrecedentsOuverts.join(', ')
+      : null
+  });
+
+  const admissible = controles.every(function(c) { return c.ok; });
+
+  return {
+    cleMois: cleStr,
+    libelleMois: libelleMois,
+    admissible: admissible,
+    dateRapprochement: ligneMois.dateRapprochement,
+    notes: ligneMois.notes,
+    controles: controles
+  };
+}
+
+function fermerMoisComptable(cleMois, note) {
+  const cleStr = String(cleMois || '').trim();
+
+  if (!cleStr.match(/^\d{4}-\d{2}$/)) {
+    throw new Error(
+      'La clé de mois « ' + cleStr +
+      ' » est invalide. Format attendu : YYYY-MM.'
+    );
+  }
+
   const verrou = LockService.getDocumentLock();
 
   if (!verrou.tryLock(30000)) {
@@ -178,148 +369,241 @@ function auditerClotureMoisComptable(cleMois) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-    // 3. Préparer l'onglet
-    preparerOngletRapprochement_(ss);
+    // Audit complet sous verrou — inclut recalcul
+    const audit = auditerClotureMoisComptableSansVerrou_(ss, cleStr);
 
-    // 4. Recalculer entièrement depuis les sources
+    // Refus si période inexistante
+    const ctrlPeriode = audit.controles.filter(function(c) {
+      return c.code === 'PERIODE_EXISTANTE';
+    })[0];
+    if (!ctrlPeriode || !ctrlPeriode.ok) {
+      throw new Error(
+        'Le mois ' + cleStr +
+        ' n\'existe pas dans le rapprochement recalculé.'
+      );
+    }
+
+    // Refus si déjà fermé
+    if (audit.dateRapprochement) {
+      throw new Error(
+        'Le mois ' + audit.libelleMois +
+        ' est déjà clôturé (le ' + audit.dateRapprochement + ').'
+      );
+    }
+
+    // Refus si un contrôle échoue
+    const echoues = audit.controles.filter(function(c) { return !c.ok; });
+    if (echoues.length > 0) {
+      throw new Error(
+        'Impossible de clôturer ' + audit.libelleMois + '. ' +
+        echoues.length + ' contrôle(s) échoué(s) :\n' +
+        echoues.map(function(c) {
+          return '• ' + c.libelle + ' — ' + c.valeur;
+        }).join('\n')
+      );
+    }
+
+    const feuille = ss.getSheetByName(CONFIG_RAPPROCHEMENT.nomFeuille);
+    const numLigne = trouverLigneCleMoisRappr_(feuille, cleStr);
+
+    if (!numLigne) {
+      throw new Error('Ligne introuvable pour le mois ' + cleStr + '.');
+    }
+
+    const tz = ss.getSpreadsheetTimeZone();
+    const maintenant = new Date();
+    const horodatage = Utilities.formatDate(
+      maintenant, tz, 'yyyy-MM-dd HH:mm'
+    );
+
+    const noteExistante = String(
+      feuille.getRange(numLigne, CONFIG_RAPPROCHEMENT.COL_NOTES).getValue() || ''
+    );
+    const noteUtil = String(note || '').trim();
+    const entree = '[' + horodatage + '] Clôture du mois' +
+      (noteUtil ? ' — ' + noteUtil : '');
+    const nouvelleNote = noteExistante
+      ? noteExistante + '\n' + entree
+      : entree;
+
+    feuille.getRange(numLigne, CONFIG_RAPPROCHEMENT.COL_DATE_RAPPR)
+      .setValue(maintenant);
+    feuille.getRange(numLigne, CONFIG_RAPPROCHEMENT.COL_NOTES)
+      .setValue(nouvelleNote);
+
+    SpreadsheetApp.flush();
     calculerEtEcrireRapprochement_(ss);
 
-    // 5. Lire le mois demandé après le recalcul
-    const donnees = obtenirDonneesRapprochementBancaire();
-    const ligneMois = donnees.lignes.filter(function(l) {
-      return l.cle === cleStr;
-    })[0] || null;
-
-    // 6. Construire les contrôles
-    const controles = [];
-
-    // PERIODE_EXISTANTE — le mois doit exister dans les données recalculées
-    const periodeExiste = ligneMois !== null;
-    controles.push({
-      code: 'PERIODE_EXISTANTE',
-      libelle: 'Période présente dans le rapprochement',
-      ok: periodeExiste,
-      valeur: periodeExiste ? 'Oui' : 'Non',
-      detail: periodeExiste
-        ? null
-        : 'Le mois ' + cleStr +
-          ' ne figure pas dans les données recalculées. ' +
-          'Vérifiez que des transactions existent dans Import bancaire pour ce mois.'
-    });
-
-    if (!periodeExiste) {
-      return {
-        cleMois: cleStr,
-        libelleMois: libelleMois,
-        admissible: false,
-        dateRapprochement: '',
-        notes: '',
-        controles: controles
-      };
-    }
-
-    // IMPORT_CLASSE — transactionsAClasser === 0
-    const aClasser = ligneMois.transactionsAClasser;
-    controles.push({
-      code: 'IMPORT_CLASSE',
-      libelle: 'Transactions bancaires classées',
-      ok: aClasser === 0,
-      valeur: aClasser === 0
-        ? 'Toutes classées'
-        : aClasser + ' transaction(s) encore à classer',
-      detail: null
-    });
-
-    // JOURNAL_EQUILIBRE — journalEquilibre === true
-    const journalEq = ligneMois.journalEquilibre;
-    controles.push({
-      code: 'JOURNAL_EQUILIBRE',
-      libelle: 'Journal comptable équilibré',
-      ok: journalEq,
-      valeur: journalEq ? 'Équilibré' : 'Non équilibré',
-      detail: journalEq
-        ? null
-        : 'La somme des débits ne correspond pas à la somme des crédits pour ce mois.'
-    });
-
-    // ECRITURES_LIEES — ecritures1000SansLien === 0
-    const sansLien = ligneMois.ecritures1000SansLien;
-    controles.push({
-      code: 'ECRITURES_LIEES',
-      libelle: 'Écritures compte 1000 liées à une transaction bancaire',
-      ok: sansLien === 0,
-      valeur: sansLien === 0
-        ? 'Toutes liées'
-        : sansLien + ' écriture(s) sans lien bancaire',
-      detail: null
-    });
-
-    // SOLDE_CONCORDE — |écart| < TOLERANCE
-    const ecart = ligneMois.ecart;
-    const soldeConcorde = Math.abs(ecart) < CONFIG_RAPPROCHEMENT.TOLERANCE;
-    controles.push({
-      code: 'SOLDE_CONCORDE',
-      libelle: 'Solde bancaire concordant avec le solde comptable 1000',
-      ok: soldeConcorde,
-      valeur: 'Écart : ' +
-        (ecart >= 0 ? '+' : '') +
-        ecart.toFixed(2) + ' $',
-      detail: soldeConcorde
-        ? null
-        : 'L\'écart dépasse la tolérance de ' +
-          CONFIG_RAPPROCHEMENT.TOLERANCE + ' $. ' +
-          'Solde bancaire fin : ' + ligneMois.soldeBancaireFin.toFixed(2) +
-          ' $ — Solde comptable : ' + ligneMois.soldeComptable.toFixed(2) + ' $.'
-    });
-
-    // PIECES_DEPENSES — toutes les dépenses actives du mois ont une pièce justificative
-    const depenses = chargerDepensesMois_Rappr_(ss, cleStr);
-    const depensesSansPiece = depenses.filter(function(d) {
-      return d.pieceCtrl !== 'OK';
-    });
-    const LIMITE_DETAIL = 20;
-    var detailPieces = null;
-
-    if (depensesSansPiece.length > 0) {
-      var ids = depensesSansPiece
-        .slice(0, LIMITE_DETAIL)
-        .map(function(d) { return d.idTransaction; })
-        .join(', ');
-
-      if (depensesSansPiece.length > LIMITE_DETAIL) {
-        ids += ' … (+' + (depensesSansPiece.length - LIMITE_DETAIL) + ' autres)';
-      }
-
-      detailPieces = ids;
-    }
-
-    controles.push({
-      code: 'PIECES_DEPENSES',
-      libelle: 'Pièces justificatives des dépenses',
-      ok: depensesSansPiece.length === 0,
-      valeur: depenses.length === 0
-        ? 'Aucune dépense ce mois'
-        : depensesSansPiece.length === 0
-          ? 'Toutes les dépenses (' + depenses.length + ') ont une pièce'
-          : depensesSansPiece.length + ' dépense(s) sur ' + depenses.length + ' sans pièce',
-      detail: detailPieces
-    });
-
-    // admissible = true seulement si tous les contrôles sont réussis
-    const admissible = controles.every(function(c) { return c.ok; });
-
+    const parties = cleStr.split('-');
     return {
-      cleMois: cleStr,
-      libelleMois: libelleMois,
-      admissible: admissible,
-      dateRapprochement: ligneMois.dateRapprochement,
-      notes: ligneMois.notes,
-      controles: controles
+      succes: true,
+      libelleMois: libelleMoisRappr_(Number(parties[0]), Number(parties[1])),
+      horodatage: horodatage,
+      donnees: obtenirDonneesRapprochementBancaire()
     };
 
   } finally {
     verrou.releaseLock();
   }
+}
+
+function reouvrirMoisComptable(cleMois, motif) {
+  const cleStr = String(cleMois || '').trim();
+
+  if (!cleStr.match(/^\d{4}-\d{2}$/)) {
+    throw new Error(
+      'La clé de mois « ' + cleStr +
+      ' » est invalide. Format attendu : YYYY-MM.'
+    );
+  }
+
+  const motifStr = String(motif || '').trim();
+  if (!motifStr) {
+    throw new Error('Un motif de réouverture est obligatoire.');
+  }
+
+  const verrou = LockService.getDocumentLock();
+
+  if (!verrou.tryLock(30000)) {
+    throw new Error(
+      'Une autre opération est déjà en cours. ' +
+      'Réessayez dans quelques secondes.'
+    );
+  }
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const feuille = ss.getSheetByName(CONFIG_RAPPROCHEMENT.nomFeuille);
+
+    if (!feuille || feuille.getLastRow() < CONFIG_RAPPROCHEMENT.premiereLigne) {
+      throw new Error(
+        'L\'onglet « Rapprochement bancaire » est vide ou introuvable.'
+      );
+    }
+
+    const numLigne = trouverLigneCleMoisRappr_(feuille, cleStr);
+
+    if (!numLigne) {
+      throw new Error(
+        'Le mois ' + cleStr + ' est introuvable dans le rapprochement.'
+      );
+    }
+
+    // Vérifier que le mois est effectivement fermé
+    const dateL = feuille
+      .getRange(numLigne, CONFIG_RAPPROCHEMENT.COL_DATE_RAPPR)
+      .getValue();
+    const estFerme = dateL instanceof Date && !isNaN(dateL.getTime());
+
+    if (!estFerme) {
+      const p = cleStr.split('-');
+      throw new Error(
+        'Le mois ' +
+        libelleMoisRappr_(Number(p[0]), Number(p[1])) +
+        ' n\'est pas clôturé.'
+      );
+    }
+
+    // Vérifier qu'aucun mois ultérieur n'est clôturé
+    const nbLignes =
+      feuille.getLastRow() - CONFIG_RAPPROCHEMENT.premiereLigne + 1;
+    const toutesValeurs = feuille
+      .getRange(
+        CONFIG_RAPPROCHEMENT.premiereLigne,
+        1,
+        nbLignes,
+        CONFIG_RAPPROCHEMENT.NOMBRE_COLONNES
+      )
+      .getValues();
+
+    const moisFermesUlterieurs = [];
+    toutesValeurs.forEach(function(ligneData) {
+      const cleRow = normaliserCleMoisRappr_(ligneData[0]);
+      if (!cleRow || cleRow <= cleStr) return;
+      const dateLRow = ligneData[CONFIG_RAPPROCHEMENT.COL_DATE_RAPPR - 1];
+      if (dateLRow instanceof Date && !isNaN(dateLRow.getTime())) {
+        const p2 = cleRow.split('-');
+        moisFermesUlterieurs.push(
+          libelleMoisRappr_(Number(p2[0]), Number(p2[1]))
+        );
+      }
+    });
+
+    if (moisFermesUlterieurs.length > 0) {
+      const p = cleStr.split('-');
+      throw new Error(
+        'Impossible de réouvrir ' +
+        libelleMoisRappr_(Number(p[0]), Number(p[1])) +
+        '. Des mois ultérieurs sont clôturés : ' +
+        moisFermesUlterieurs.join(', ') +
+        '. Réouvrez-les en ordre inverse (du plus récent au plus ancien).'
+      );
+    }
+
+    const tz = ss.getSpreadsheetTimeZone();
+    const horodatage = Utilities.formatDate(
+      new Date(), tz, 'yyyy-MM-dd HH:mm'
+    );
+
+    const noteExistante = String(
+      feuille.getRange(numLigne, CONFIG_RAPPROCHEMENT.COL_NOTES).getValue() || ''
+    );
+    const entree = '[' + horodatage + '] Réouverture du mois — ' + motifStr;
+    const nouvelleNote = noteExistante
+      ? noteExistante + '\n' + entree
+      : entree;
+
+    feuille.getRange(numLigne, CONFIG_RAPPROCHEMENT.COL_NOTES)
+      .setValue(nouvelleNote);
+    feuille.getRange(numLigne, CONFIG_RAPPROCHEMENT.COL_DATE_RAPPR)
+      .clearContent();
+
+    SpreadsheetApp.flush();
+
+    // Vérification explicite : col M doit contenir l'entrée de réouverture
+    // ET préserver les notes de clôture préexistantes (jamais clearContent sur M).
+    const noteApres = String(
+      feuille.getRange(numLigne, CONFIG_RAPPROCHEMENT.COL_NOTES).getValue() || ''
+    );
+    if (noteApres.indexOf(horodatage) === -1) {
+      throw new Error(
+        'Anomalie interne : l\'entrée de réouverture (' + horodatage +
+        ') est absente de la col M du mois ' + cleStr +
+        '. L\'opération a été interrompue.'
+      );
+    }
+
+    calculerEtEcrireRapprochement_(ss);
+
+    const parties = cleStr.split('-');
+    return {
+      succes: true,
+      libelleMois: libelleMoisRappr_(Number(parties[0]), Number(parties[1])),
+      donnees: obtenirDonneesRapprochementBancaire()
+    };
+
+  } finally {
+    verrou.releaseLock();
+  }
+}
+
+function trouverLigneCleMoisRappr_(feuille, cleMois) {
+  if (!feuille || feuille.getLastRow() < CONFIG_RAPPROCHEMENT.premiereLigne) {
+    return null;
+  }
+
+  const nbLignes = feuille.getLastRow() - CONFIG_RAPPROCHEMENT.premiereLigne + 1;
+  const valeurs = feuille
+    .getRange(CONFIG_RAPPROCHEMENT.premiereLigne, 1, nbLignes, 1)
+    .getValues();
+
+  for (var i = 0; i < valeurs.length; i++) {
+    if (normaliserCleMoisRappr_(valeurs[i][0]) === cleMois) {
+      return CONFIG_RAPPROCHEMENT.premiereLigne + i;
+    }
+  }
+
+  return null;
 }
 
 // ─── Préparation de l'onglet ──────────────────────────────────────────────────
@@ -396,6 +680,7 @@ function calculerEtEcrireRapprochement_(ss) {
   const journalData = chargerJournal_Rappr_(ss);
   const transData = chargerTransactions_Rappr_(ss);
   const soldesOuv = chargerSoldesOuverture_Rappr_(ss);
+  const depensesParMois = chargerToutesDepensesParMois_Rappr_(ss);
 
   // 2. Valider la présence du compte 1000 dans Soldes ouverture
   if (!soldesOuv[CONFIG_RAPPROCHEMENT.COMPTE_BANCAIRE]) {
@@ -637,22 +922,33 @@ function calculerEtEcrireRapprochement_(ss) {
     // Écart : solde bancaire fin − solde comptable 1000
     const ecart = arrondirRappr_(soldeBancaireFin - soldeCumul1000);
 
-    // Statut — priorité stricte et exhaustive :
-    // 1. « À compléter »       si au moins une transaction bancaire du mois n'est pas « Classée »
-    // 2. « À vérifier »        si Journal non équilibré (|débits − crédits| ≥ 0,005 $)
-    // 3. « À vérifier »        si une écriture du compte 1000 est sans lien bancaire
-    // 4. « À vérifier »        si |écart bancaire/comptable| ≥ 0,005 $
-    // 5. « Prêt à rapprocher » si tous les contrôles réussissent
-    // Note : « Rapproché » n'est jamais attribué automatiquement (phase 3B uniquement)
+    // Préserver les colonnes L et M (date clôture + notes)
+    const preserve = existant[periode.cle] || {};
+    const moisFerme =
+      preserve.dateRappr instanceof Date &&
+      !isNaN(preserve.dateRappr.getTime());
+
+    // Statut — priorité stricte :
+    // Mois fermé → 'Rapproché' ou 'Rapproché — anomalie' selon les contrôles
+    // Sinon : priorité habituelle À compléter → À vérifier → Prêt à rapprocher
     let statut;
 
-    if (aClasser > 0) {
+    if (moisFerme) {
+      const depMois = depensesParMois[periode.cle] || { total: 0, sansPiece: 0 };
+      const tousControles =
+        aClasser === 0 &&
+        journalEquilibre &&
+        sansLien === 0 &&
+        Math.abs(ecart) < CONFIG_RAPPROCHEMENT.TOLERANCE &&
+        depMois.sansPiece === 0;
+      statut = tousControles ? 'Rapproché' : 'Rapproché — anomalie';
+    } else if (aClasser > 0) {
       statut = 'À compléter';
-    } else if (!journalEquilibre) {
-      statut = 'À vérifier';
-    } else if (sansLien > 0) {
-      statut = 'À vérifier';
-    } else if (Math.abs(ecart) >= CONFIG_RAPPROCHEMENT.TOLERANCE) {
+    } else if (
+      !journalEquilibre ||
+      sansLien > 0 ||
+      Math.abs(ecart) >= CONFIG_RAPPROCHEMENT.TOLERANCE
+    ) {
       statut = 'À vérifier';
     } else {
       statut = 'Prêt à rapprocher';
@@ -660,8 +956,6 @@ function calculerEtEcrireRapprochement_(ss) {
 
     // Prochain solde bancaire d'ouverture = solde fin du mois courant
     soldeOuvertureBancaire = soldeBancaireFin;
-
-    const preserve = existant[periode.cle] || {};
 
     return {
       cle: periode.cle,
@@ -727,6 +1021,8 @@ function calculerEtEcrireRapprochement_(ss) {
     resultats.forEach(function(r, index) {
       const ligne = CONFIG_RAPPROCHEMENT.premiereLigne + index;
       const couleur =
+        r.statut === 'Rapproché' ? '#c8e6c9' :
+        r.statut === 'Rapproché — anomalie' ? '#fce8e6' :
         r.statut === 'Prêt à rapprocher' ? '#e6f4ea' :
         r.statut === 'À vérifier' ? '#fce8e6' :
         '#fff7df';
@@ -937,6 +1233,149 @@ function chargerDepensesMois_Rappr_(ss, cleMois) {
   });
 
   return depenses;
+}
+
+// Charge toutes les dépenses actives regroupées par mois depuis Transactions (A:Q).
+// Retourne { cleMois: { total, sansPiece } } — utilisé par calculerEtEcrireRapprochement_.
+function chargerToutesDepensesParMois_Rappr_(ss) {
+  const feuille = ss.getSheetByName('Transactions');
+
+  if (!feuille || feuille.getLastRow() < 6) {
+    return {};
+  }
+
+  const nbLignes = feuille.getLastRow() - 5;
+  const valeurs = feuille.getRange(6, 1, nbLignes, 17).getValues();
+  const parMois = {};
+
+  valeurs.forEach(function(ligne) {
+    const idTransaction = String(ligne[0] || '').trim();
+    const date = ligne[1];
+    const type = String(ligne[2] || '').trim();
+    const statut = String(ligne[14] || '').trim();
+    const pieceCtrl = String(ligne[16] || '').trim();
+
+    if (!idTransaction) return;
+    if (!(date instanceof Date) || isNaN(date.getTime())) return;
+    if (type !== 'Dépense') return;
+    if (statut === 'Annulée') return;
+
+    const cle = cleAnneesMoisRappr_(date);
+    if (!parMois[cle]) parMois[cle] = { total: 0, sansPiece: 0 };
+    parMois[cle].total++;
+    if (pieceCtrl !== 'OK') parMois[cle].sansPiece++;
+  });
+
+  return parMois;
+}
+
+// ─── Garde de période comptable ───────────────────────────────────────────────
+
+// Dérive la clé YYYY-MM depuis une Date comptable.
+// Utilise le fuseau du classeur (America/Toronto).
+function obtenirCleMoisDepuisDateComptable_(date) {
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+    throw new Error(
+      'Date comptable invalide : ' + String(date)
+    );
+  }
+  const tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  return Utilities.formatDate(date, tz, 'yyyy-MM');
+}
+
+// Lit l'onglet Rapprochement bancaire et retourne l'état de la période.
+// Ne lance aucun verrou — doit être appelée sous verrou existant.
+// Retourne { cle, estFermee, libelle }.
+function obtenirEtatPeriodeComptable_(ss, date) {
+  const cle = obtenirCleMoisDepuisDateComptable_(date);
+  const feuille = ss.getSheetByName(CONFIG_RAPPROCHEMENT.nomFeuille);
+
+  if (!feuille || feuille.getLastRow() < CONFIG_RAPPROCHEMENT.premiereLigne) {
+    return { cle: cle, estFermee: false };
+  }
+
+  const nbLignes =
+    feuille.getLastRow() - CONFIG_RAPPROCHEMENT.premiereLigne + 1;
+  const valeurs = feuille
+    .getRange(
+      CONFIG_RAPPROCHEMENT.premiereLigne,
+      1,
+      nbLignes,
+      CONFIG_RAPPROCHEMENT.NOMBRE_COLONNES
+    )
+    .getValues();
+
+  for (var i = 0; i < valeurs.length; i++) {
+    const cleRow = normaliserCleMoisRappr_(valeurs[i][0]);
+    if (cleRow !== cle) continue;
+
+    const dateL = valeurs[i][CONFIG_RAPPROCHEMENT.COL_DATE_RAPPR - 1];
+    if (dateL instanceof Date && !isNaN(dateL.getTime())) {
+      const p = cle.split('-');
+      return {
+        cle: cle,
+        estFermee: true,
+        libelle: libelleMoisRappr_(Number(p[0]), Number(p[1]))
+      };
+    }
+    // L non vide mais invalide (texte, nombre, Date NaN) = anomalie bloquante.
+    // Ne jamais traiter cette situation comme une période ouverte.
+    if (dateL !== '' && dateL !== null && dateL !== undefined) {
+      throw new Error(
+        'La colonne L du mois ' + cle +
+        ' contient une valeur non vide invalide : « ' + String(dateL) + ' ». ' +
+        'Corrigez cette cellule dans l\'onglet « Rapprochement bancaire » avant de continuer.'
+      );
+    }
+    return { cle: cle, estFermee: false };
+  }
+
+  return { cle: cle, estFermee: false };
+}
+
+// Lance une erreur bloquante si la période comptable est fermée.
+// action : courte description à l'infinitif, ex. « créer une transaction ».
+function verifierPeriodeComptableOuverte_(ss, date, action) {
+  const etat = obtenirEtatPeriodeComptable_(ss, date);
+  if (etat.estFermee) {
+    const p = etat.cle.split('-');
+    const libelle = libelleMoisRappr_(Number(p[0]), Number(p[1]));
+    throw new Error(
+      'La période ' + libelle +
+      ' est fermée. Réouvrez-la avant de ' + action + '.'
+    );
+  }
+}
+
+// Retourne la liste des libellés de tous les mois actuellement clôturés.
+// Utilisé par ReinitialisationTests.js pour bloquer la remise à zéro.
+function obtenirMoisFermesRapprochement_(ss) {
+  const feuille = ss.getSheetByName(CONFIG_RAPPROCHEMENT.nomFeuille);
+
+  if (!feuille || feuille.getLastRow() < CONFIG_RAPPROCHEMENT.premiereLigne) {
+    return [];
+  }
+
+  const nbLignes =
+    feuille.getLastRow() - CONFIG_RAPPROCHEMENT.premiereLigne + 1;
+  const valeurs = feuille
+    .getRange(
+      CONFIG_RAPPROCHEMENT.premiereLigne,
+      1,
+      nbLignes,
+      CONFIG_RAPPROCHEMENT.NOMBRE_COLONNES
+    )
+    .getValues();
+
+  return valeurs.reduce(function(acc, ligne) {
+    const cle = normaliserCleMoisRappr_(ligne[0]);
+    const dateL = ligne[CONFIG_RAPPROCHEMENT.COL_DATE_RAPPR - 1];
+    if (cle && dateL instanceof Date && !isNaN(dateL.getTime())) {
+      const p = cle.split('-');
+      acc.push(libelleMoisRappr_(Number(p[0]), Number(p[1])));
+    }
+    return acc;
+  }, []);
 }
 
 // ─── Utilitaires ─────────────────────────────────────────────────────────────

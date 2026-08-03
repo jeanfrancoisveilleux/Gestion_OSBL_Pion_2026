@@ -313,6 +313,15 @@ function annulerGroupeTransactionsOSBLSansVerrou_(
     idTransaction,
     referenceBancaire
   );
+
+  // Refuser si la période de l'une des transactions à annuler est fermée
+  cibles.forEach(function(transaction) {
+    const dateTransaction = transaction.valeurs[1];
+    if (dateTransaction instanceof Date) {
+      verifierPeriodeComptableOuverte_(ss, dateTransaction, 'annuler une transaction');
+    }
+  });
+
   const ids = {};
 
   cibles.forEach(function(transaction) {
@@ -1223,6 +1232,12 @@ function enregistrerEtComptabiliserTransactionMixte(donnees) {
       modeRevision: false
     });
 
+    verifierPeriodeComptableOuverte_(
+      SpreadsheetApp.getActiveSpreadsheet(),
+      contexte.valeursImport[1],
+      'classer une transaction bancaire'
+    );
+
     enregistrerRepartitionTechniqueMixte_(
       contexte.repartition,
       contexte.valeursImport,
@@ -1265,6 +1280,12 @@ function enregistrerRevisionTransactionMixte(donnees) {
     });
     const idRevisionSource = extraireIdGroupeDepuisTransactionMixte_(
       contexte.idTransactionSource
+    );
+
+    verifierPeriodeComptableOuverte_(
+      SpreadsheetApp.getActiveSpreadsheet(),
+      contexte.valeursImport[1],
+      'créer une révision de transaction bancaire'
     );
 
     annulerGroupeTransactionsOSBLSansVerrou_(
@@ -1905,6 +1926,10 @@ function finaliserTransactionMixteParId_(idImport, options) {
   );
 
   const dateTransaction = valeursImport[1];
+
+  // Refuser si la période de la transaction bancaire est fermée
+  verifierPeriodeComptableOuverte_(ss, dateTransaction, 'classer une transaction bancaire');
+
   const descriptionBancaire = String(valeursImport[2] || '').trim();
   const acheteur = extraireNomInteracMixte_(descriptionBancaire);
   const ecrituresComptables = developperEcrituresComptablesMixtes_(
@@ -3066,6 +3091,12 @@ function enregistrerEtComptabiliserDepenseBancaireMixte(donnees) {
       modeRevision: false
     });
 
+    verifierPeriodeComptableOuverte_(
+      SpreadsheetApp.getActiveSpreadsheet(),
+      contexte.valeursImport[1],
+      'classer une dépense bancaire'
+    );
+
     enregistrerRepartitionDepenseMixte_(
       contexte.repartition,
       contexte.valeursImport,
@@ -3107,6 +3138,12 @@ function enregistrerRevisionDepenseBancaireMixte(donnees) {
     });
     const idRevisionSource = extraireIdGroupeDepuisTransactionMixte_(
       contexte.idTransactionSource
+    );
+
+    verifierPeriodeComptableOuverte_(
+      SpreadsheetApp.getActiveSpreadsheet(),
+      contexte.valeursImport[1],
+      'créer une révision de dépense bancaire'
     );
 
     annulerGroupeTransactionsOSBLSansVerrou_(
@@ -3610,6 +3647,10 @@ function finaliserDepenseMixteParId_(idImport, options) {
   }
 
   const dateTransaction = valeursImport[1];
+
+  // Refuser si la période de la transaction bancaire est fermée
+  verifierPeriodeComptableOuverte_(ss, dateTransaction, 'classer une dépense bancaire');
+
   const descriptionBancaire = String(valeursImport[2] || '').trim();
   const transactionsCreees = [];
 
@@ -3919,6 +3960,12 @@ function enregistrerEtComptabiliserRevenuDirectMixte(donnees) {
       modeRevision: false
     });
 
+    verifierPeriodeComptableOuverte_(
+      SpreadsheetApp.getActiveSpreadsheet(),
+      contexte.valeursImport[1],
+      'classer un revenu direct'
+    );
+
     enregistrerRepartitionRevenuDirectMixte_(
       contexte.repartition,
       contexte.valeursImport,
@@ -4012,6 +4059,12 @@ function enregistrerRevisionRevenuDirectMixte(donnees) {
     });
     const idRevisionSource = extraireIdGroupeDepuisTransactionMixte_(
       contexte.idTransactionSource
+    );
+
+    verifierPeriodeComptableOuverte_(
+      SpreadsheetApp.getActiveSpreadsheet(),
+      contexte.valeursImport[1],
+      'créer une révision de revenu direct'
     );
 
     annulerGroupeTransactionsOSBLSansVerrou_(
@@ -4591,6 +4644,10 @@ function finaliserRevenuDirectMixteParId_(idImport, options) {
   }
 
   const dateTransaction = valeursImport[1];
+
+  // Refuser si la période de la transaction bancaire est fermée
+  verifierPeriodeComptableOuverte_(ss, dateTransaction, 'classer un revenu direct');
+
   const descriptionBancaire = String(valeursImport[2] || '').trim();
   const contact = extraireNomInteracMixte_(descriptionBancaire) || descriptionBancaire;
   const transactionsCreees = [];

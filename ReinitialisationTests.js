@@ -670,6 +670,15 @@ function executerAuditReinit_(ss) {
     });
   });
 
+  // Vérifier qu'aucun mois de rapprochement n'est clôturé (bloquant pour la remise à zéro)
+  var moisFermes = obtenirMoisFermesRapprochement_(ss);
+  if (moisFermes.length > 0) {
+    moisFermes.forEach(function(libelle) {
+      rapport.problemes.push('Mois cloture (bloquant) : ' + libelle);
+    });
+    rapport.bloquant = true;
+  }
+
   return rapport;
 }
 

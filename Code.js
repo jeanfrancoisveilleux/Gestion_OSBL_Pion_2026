@@ -383,6 +383,9 @@ function enregistrerTransaction(donnees) {
     verifierCompteExiste_(configuration, comptePaiement);
 
     const date = new Date(donnees.date + 'T12:00:00');
+
+    verifierPeriodeComptableOuverte_(classeur, date, 'créer une transaction');
+
     const identifiant =
       'T-' +
       Utilities.formatDate(
