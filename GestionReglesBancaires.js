@@ -19,17 +19,6 @@ const CONFIG_REGLES_BANCAIRES_ = {
   NOMBRE_COLONNES: 14
 };
 
-const COMPOSANTES_BANCAIRES_ = [
-  'Entrée – Pion joues-tu?',
-  'Entrée – Cartier',
-  'Forfait Pion joues-tu?',
-  'Forfait Cartier',
-  'Forfait combiné',
-  'T-shirt',
-  'Chandail à manches longues',
-  'Hoodie'
-];
-
 const TYPES_CLASSEMENT_REGLES_ = [
   'Dépense',
   'Revenu comptable direct',
@@ -396,7 +385,11 @@ function chargerReglesBancairesActives_(ss) {
     }
 
     if (composante && !refs.composantes.has(composante)) {
-      ajouterErreur('Composante « ' + composante + ' » inconnue.');
+      if (refs.composantesInactives && refs.composantesInactives.has(composante)) {
+        ajouterErreur('Composante « ' + composante + ' » est désactivée — réactivez-la ou modifiez la règle.');
+      } else {
+        ajouterErreur('Composante « ' + composante + ' » inconnue.');
+      }
     }
 
     if (regleValide) {
@@ -495,6 +488,21 @@ function chargerReferencesValidationRegles_(ss) {
       });
   }
 
+  // Chargement unique : actives et inactives depuis une seule lecture de AA:AL.
+  var defsToutes = chargerDefinitionsComposantes_(ss, { inclureInactives: true });
+  if (!defsToutes.length) {
+    throw new Error(
+      'Aucune composante configurée. ' +
+      'Exécutez « Installer / mettre à jour les composantes » avant les règles bancaires.'
+    );
+  }
+  var composantes = new Set(
+    defsToutes.filter(function(d) { return d.actif; }).map(function(d) { return d.libelle; })
+  );
+  var composantesInactives = new Set(
+    defsToutes.filter(function(d) { return !d.actif; }).map(function(d) { return d.libelle; })
+  );
+
   return {
     fournisseurs: fournisseurs,
     contacts: contacts,
@@ -502,7 +510,8 @@ function chargerReferencesValidationRegles_(ss) {
     programmes: programmes,
     projets: projets,
     projetsExemple: projetsExemple,
-    composantes: new Set(COMPOSANTES_BANCAIRES_)
+    composantes: composantes,
+    composantesInactives: composantesInactives
   };
 }
 
@@ -696,13 +705,22 @@ function appliquerValidationsReglesBancaires_(ss, feuille) {
         .build()
     );
 
-  feuille.getRange(C.premiereLigne, C.COL_COMPOSANTE, plageData, 1)
-    .setDataValidation(
-      SpreadsheetApp.newDataValidation()
-        .requireValueInList(COMPOSANTES_BANCAIRES_, true)
-        .setAllowInvalid(true)
-        .build()
-    );
+  (function() {
+    var defs = chargerDefinitionsComposantes_(ss, { inclureInactives: false });
+    if (!defs.length) {
+      throw new Error(
+        'Aucune composante configurée. ' +
+        'Exécutez « Installer / mettre à jour les composantes » avant les règles bancaires.'
+      );
+    }
+    feuille.getRange(C.premiereLigne, C.COL_COMPOSANTE, plageData, 1)
+      .setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInList(defs.map(function(d) { return d.libelle; }), true)
+          .setAllowInvalid(true)
+          .build()
+      );
+  })();
 
   feuille.getRange(C.premiereLigne, C.COL_FOURNISSEUR, plageData, 1)
     .setNumberFormat('@');
@@ -1125,13 +1143,22 @@ function preparerColonnesExtenduesImportBancaire_(ss) {
     );
 
   // U (col 21) : validation Composante
-  feuille.getRange(6, 21, plageData, 1)
-    .setDataValidation(
-      SpreadsheetApp.newDataValidation()
-        .requireValueInList(COMPOSANTES_BANCAIRES_, true)
-        .setAllowInvalid(true)
-        .build()
-    );
+  (function() {
+    var defs = chargerDefinitionsComposantes_(ss, { inclureInactives: false });
+    if (!defs.length) {
+      throw new Error(
+        'Aucune composante configurée. ' +
+        'Exécutez « Installer / mettre à jour les composantes » avant l\'import bancaire.'
+      );
+    }
+    feuille.getRange(6, 21, plageData, 1)
+      .setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInList(defs.map(function(d) { return d.libelle; }), true)
+          .setAllowInvalid(true)
+          .build()
+      );
+  })();
 
   // V (col 22) : validation Projets réels (excluant Exemple)
   const feuilleProjets = ss.getSheetByName('Projets');

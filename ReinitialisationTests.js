@@ -116,19 +116,25 @@ const SPECS_ONGLETS_REINIT_ = [
     ligneDepart: 6,
     colId: 1,
     // A:F = données du forfait (ID, date, acheteur, type, montant, ID transaction)
-    // I:J = statut et notes (données)
-    // G:H = formules de calcul des parts Pion/Cartier — préservées
+    // I:K = statut, notes, saison (données)
+    // L:O = ID composante, part Pion%, part Cartier%, projet(s) (données)
+    // G:H = formules calculant parts Pion/Cartier depuis M/N — préservées
     plagesEffacer: [
       { col: 1, nbCols: 6, label: 'A:F' },
-      { col: 9, nbCols: 2, label: 'I:J' }
+      { col: 9, nbCols: 2, label: 'I:J' },
+      { col: 12, nbCols: 4, label: 'L:O' }
     ],
     formulesProtegees: [{ col: 7, nbCols: 2, label: 'G:H' }],
     headersAttendus: [
-      { col: 1, valeur: 'ID forfait' },
-      { col: 7, valeur: 'Part Pion joues-tu?' },
-      { col: 10, valeur: 'Notes' }
+      { col: 1,  valeur: 'ID forfait' },
+      { col: 7,  valeur: 'Part Pion joues-tu?' },
+      { col: 10, valeur: 'Notes' },
+      { col: 12, valeur: 'ID composante' },
+      { col: 13, valeur: 'Part Pion joues-tu? (%)' },
+      { col: 14, valeur: 'Part Cartier (%)' },
+      { col: 15, valeur: 'Projet(s)' }
     ],
-    nbColsMin: 10,
+    nbColsMin: 15,
     colIdVerif: null,
     labelVerif: null
   },

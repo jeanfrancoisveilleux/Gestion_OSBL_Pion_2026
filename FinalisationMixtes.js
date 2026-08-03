@@ -328,11 +328,16 @@ function annulerGroupeTransactionsOSBLSansVerrou_(
     ids[String(transaction.valeurs[0] || '').trim()] = true;
   });
 
+  // Charger avec les inactives : une annulation historique peut cibler
+  // une composante désactivée depuis la transaction d'origine.
+  const definitionsAnnul = chargerDefinitionsComposantes_(ss, { inclureInactives: true });
+
   const restaurationInventaire =
     preparerRestaurationInventaireAnnulation_(
       repartition,
       inventaire,
-      referenceBancaire
+      referenceBancaire,
+      definitionsAnnul
     );
   const ecritures = creerEcrituresAnnulationJournal_(
     journal,
@@ -531,17 +536,31 @@ function annulerForfaitsParReference_(
 function preparerRestaurationInventaireAnnulation_(
   repartition,
   inventaire,
-  referenceBancaire
+  referenceBancaire,
+  definitions
 ) {
   if (!referenceBancaire) {
     return [];
   }
 
-  const correspondances = {
-    'T-shirt': 'MERCH-TS-NOIR',
-    'Chandail à manches longues': 'MERCH-LS-NOIR',
-    'Hoodie': 'MERCH-HD-NOIR'
-  };
+  // Correspondances depuis définitions (inclut les inactives pour l'historique)
+  const correspondances = {};
+  if (definitions) {
+    definitions.forEach(function(def) {
+      if (def.ugsInventaire) correspondances[def.libelle] = def.ugsInventaire;
+    });
+  }
+
+  // Si le module n'est pas installé, refuser explicitement.
+  // Si les définitions existent mais aucune n'a d'UGS (pas de marchandise),
+  // correspondances est vide → quantites sera vide → return [] en fin de fonction.
+  if (!definitions || definitions.length === 0) {
+    throw new Error(
+      'Module composantes non installé. ' +
+      'Exécutez « Installer / mettre à jour les composantes » avant d\'annuler.'
+    );
+  }
+
   const lignesRepartition = lireLignesActivesRepartitionMixte_(
     repartition,
     referenceBancaire
@@ -1167,55 +1186,7 @@ function obtenirDonneesInterfaceMixte_(ligneImport, options) {
 }
 
 function construireOptionsComposantesMixtes_(ss, dateTransaction) {
-  const inventaire = obtenirFeuilleMixte_(ss, 'Inventaire');
-  const configuration = obtenirFeuilleMixte_(ss, 'Configuration');
-  const annee = dateTransaction instanceof Date
-    ? dateTransaction.getFullYear()
-    : new Date(dateTransaction).getFullYear();
-
-  const prixInventaire = {};
-  const derniereLigneInventaire = inventaire.getLastRow();
-
-  if (derniereLigneInventaire >= 6) {
-    inventaire
-      .getRange(6, 1, derniereLigneInventaire - 5, 11)
-      .getValues()
-      .forEach(function(ligne) {
-        prixInventaire[String(ligne[0] || '').trim()] =
-          Number(ligne[10] || 0);
-      });
-  }
-
-  let prixCombine = annee >= 2027 ? 50 : 45;
-  const tarifs = configuration.getRange('P6:S20').getValues();
-
-  tarifs.some(function(ligne) {
-    if (Number(ligne[0]) === annee) {
-      prixCombine = Number(ligne[3] || prixCombine);
-      return true;
-    }
-    return false;
-  });
-
-  return [
-    { valeur: 'Entrée – Pion joues-tu?', prix: 10 },
-    { valeur: 'Entrée – Cartier', prix: 2 },
-    { valeur: 'Forfait Pion joues-tu?', prix: 30 },
-    { valeur: 'Forfait Cartier', prix: 20 },
-    { valeur: 'Forfait combiné', prix: prixCombine },
-    {
-      valeur: 'T-shirt',
-      prix: Number(prixInventaire['MERCH-TS-NOIR'] || 25)
-    },
-    {
-      valeur: 'Chandail à manches longues',
-      prix: Number(prixInventaire['MERCH-LS-NOIR'] || 30)
-    },
-    {
-      valeur: 'Hoodie',
-      prix: Number(prixInventaire['MERCH-HD-NOIR'] || 50)
-    }
-  ];
+  return construireOptionsComposantesConfigurables_(ss, dateTransaction);
 }
 
 function enregistrerEtComptabiliserTransactionMixte(donnees) {
@@ -1459,15 +1430,16 @@ function preparerContexteTraitementMixte_(donnees, options) {
   }
 
   const planComptable = chargerPlanComptableMixte_(configuration);
-  verifierComptesRequisMixte_(planComptable);
+  const composantesPourSaisonCtx = compilerComposantesPourSaison_(ss, valeursImport[1]);
+  verifierComptesRequisMixte_(planComptable, composantesPourSaisonCtx);
 
   const lignesActivesSaisies = convertirLignesSaisiesVersActivesMixte_(
     lignes,
     idImport
   );
 
-  developperEcrituresComptablesMixtes_(lignesActivesSaisies);
-  preparerMouvementsInventaireMixte_(inventaire, lignesActivesSaisies);
+  developperEcrituresComptablesMixtes_(lignesActivesSaisies, composantesPourSaisonCtx);
+  preparerMouvementsInventaireMixte_(inventaire, lignesActivesSaisies, composantesPourSaisonCtx);
 
   if (modeRevision) {
     if (!idTransactionSource) {
@@ -1655,16 +1627,15 @@ function enregistrerRepartitionTechniqueMixte_(
     lignes.length
   );
 
-  const optionsComposantes = [
-    'Entrée – Pion joues-tu?',
-    'Entrée – Cartier',
-    'Forfait Pion joues-tu?',
-    'Forfait Cartier',
-    'Forfait combiné',
-    'T-shirt',
-    'Chandail à manches longues',
-    'Hoodie'
-  ];
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var defsActives = chargerDefinitionsComposantes_(ss, { inclureInactives: false });
+  if (!defsActives.length) {
+    throw new Error(
+      'Aucune composante configurée. ' +
+      'Exécutez « Installer / mettre à jour les composantes » avant de classer.'
+    );
+  }
+  var optionsComposantes = defsActives.map(function(d) { return d.libelle; });
 
   const validation = SpreadsheetApp.newDataValidation()
     .requireValueInList(optionsComposantes, true)
@@ -1692,31 +1663,7 @@ function enregistrerRepartitionTechniqueMixte_(
       '=IF(OR($A' + numero + '="",$F' + numero + '=""),"",$G' +
       numero + '*$H' + numero + ')'
     );
-    feuille.getRange(numero, 10).setFormula(
-      '=IF($A' + numero + '="","",IF(OR($F' + numero +
-      '="Entrée – Pion joues-tu?",$F' + numero +
-      '="Entrée – Cartier"),"Revenus d\'entrées aux événements",IF(OR($F' +
-      numero + '="Forfait Pion joues-tu?",$F' + numero +
-      '="Forfait Cartier",$F' + numero +
-      '="Forfait combiné"),"Revenus de laissez-passer et forfaits",IF(OR($F' +
-      numero + '="T-shirt",$F' + numero +
-      '="Chandail à manches longues",$F' + numero +
-      '="Hoodie"),"Ventes de marchandises et de jeux",""))))'
-    );
-    feuille.getRange(numero, 11).setFormula(
-      '=IF($A' + numero + '="","",IF(OR($F' + numero +
-      '="Entrée – Pion joues-tu?",$F' + numero +
-      '="Forfait Pion joues-tu?"),"Pion joues-tu?",IF(OR($F' +
-      numero + '="Entrée – Cartier",$F' + numero +
-      '="Forfait Cartier"),"Pion joues-tu? – Cartier",IF(OR($F' +
-      numero + '="T-shirt",$F' + numero +
-      '="Chandail à manches longues",$F' + numero +
-      '="Hoodie"),"Marchandise",""))))'
-    );
-    feuille.getRange(numero, 12).setFormula(
-      '=IF($K' + numero + '="Pion joues-tu?","PJT-2026",IF($K' +
-      numero + '="Pion joues-tu? – Cartier","PJC-2026",""))'
-    );
+    // J(10), K(11), L(12) : le serveur les écrira lors de la finalisation
     feuille.getRange(numero, 13).setFormula(
       '=IF($A' + numero + '="","",SUMIFS($I$6:$I$' +
       derniereLigneRepartition + ',$A$6:$A$' + derniereLigneRepartition +
@@ -1917,23 +1864,26 @@ function finaliserTransactionMixteParId_(idImport, options) {
     );
   }
 
-  const planComptable = chargerPlanComptableMixte_(configuration);
-  verifierComptesRequisMixte_(planComptable);
-
-  const mouvementsInventaire = preparerMouvementsInventaireMixte_(
-    inventaire,
-    lignesActives
-  );
-
   const dateTransaction = valeursImport[1];
 
   // Refuser si la période de la transaction bancaire est fermée
   verifierPeriodeComptableOuverte_(ss, dateTransaction, 'classer une transaction bancaire');
 
+  const planComptable = chargerPlanComptableMixte_(configuration);
+  const composantesPourSaison = compilerComposantesPourSaison_(ss, dateTransaction);
+  verifierComptesRequisMixte_(planComptable, composantesPourSaison);
+
+  const mouvementsInventaire = preparerMouvementsInventaireMixte_(
+    inventaire,
+    lignesActives,
+    composantesPourSaison
+  );
+
   const descriptionBancaire = String(valeursImport[2] || '').trim();
   const acheteur = extraireNomInteracMixte_(descriptionBancaire);
   const ecrituresComptables = developperEcrituresComptablesMixtes_(
-    lignesActives
+    lignesActives,
+    composantesPourSaison
   );
   const transactionParLigne = {};
   const transactionsCreees = [];
@@ -1974,14 +1924,15 @@ function finaliserTransactionMixteParId_(idImport, options) {
   lignesActives.forEach(function(ligne) {
     const composante = String(ligne.valeurs[5] || '').trim();
 
-    if (estForfaitMixte_(composante)) {
+    if (estForfaitMixte_(composante, composantesPourSaison)) {
       creerForfaitDepuisRepartitionMixte_(
         forfaits,
         dateTransaction,
         acheteur,
         composante,
         Number(ligne.valeurs[8] || 0),
-        idImport
+        idImport,
+        composantesPourSaison.byLibelle[composante]
       );
     }
   });
@@ -2003,6 +1954,55 @@ function finaliserTransactionMixteParId_(idImport, options) {
     inventaire,
     mouvementsInventaire
   );
+
+  // Écrire J/K/L dans les lignes de Répartition depuis la composante compilée.
+  // J = noms des comptes uniques (compte principal + compteSubstitut si différent).
+  // K = programmes uniques.
+  // L = projets uniques.
+  // Séparateur : ' / '.
+  lignesActives.forEach(function(ligne) {
+    var composanteLigne = String(ligne.valeurs[5] || '').trim();
+    var compiled = composantesPourSaison.byLibelle[composanteLigne];
+    if (!compiled) return;
+
+    var def  = compiled.definition;
+    var reps = compiled.repartitions;
+
+    var comptesVus = {};
+    var comptesList = [];
+    var programmesVus = {};
+    var programmesList = [];
+    var projetsVus = {};
+    var projetsList = [];
+
+    reps.forEach(function(r) {
+      var code = r.compteSubstitut || def.codeCompte;
+      // J = noms résolus depuis Configuration A:B — jamais un code brut (4000/4010/4020).
+      // verifierComptesRequisMixte_ garantit que tous les codes sont dans le plan.
+      if (!planComptable[code] || !planComptable[code].nom) {
+        throw new Error(
+          'Compte « ' + code + ' » absent du plan comptable — impossible d\'écrire la colonne J.'
+        );
+      }
+      var nom = planComptable[code].nom;
+      if (nom && !comptesVus[nom]) {
+        comptesVus[nom] = true;
+        comptesList.push(nom);
+      }
+      if (r.programme && !programmesVus[r.programme]) {
+        programmesVus[r.programme] = true;
+        programmesList.push(r.programme);
+      }
+      if (r.projet && !projetsVus[r.projet]) {
+        projetsVus[r.projet] = true;
+        projetsList.push(r.projet);
+      }
+    });
+
+    repartition.getRange(ligne.numero, 10).setValue(comptesList.join(' / '));
+    repartition.getRange(ligne.numero, 11).setValue(programmesList.join(' / '));
+    repartition.getRange(ligne.numero, 12).setValue(projetsList.join(' / '));
+  });
 
   const ancienneNote = String(valeursImport[12] || '').trim();
   const noteRevision = idRevisionSource
@@ -2035,93 +2035,58 @@ function finaliserTransactionMixteParId_(idImport, options) {
   };
 }
 
-function developperEcrituresComptablesMixtes_(lignesActives) {
-  const definitions = {
-    'Entrée – Pion joues-tu?': {
-      codeCompte: '4000',
-      programme: 'Pion joues-tu?',
-      projet: 'PJT-2026'
-    },
-    'Entrée – Cartier': {
-      codeCompte: '4000',
-      programme: 'Pion joues-tu? – Cartier',
-      projet: 'PJC-2026'
-    },
-    'Forfait Pion joues-tu?': {
-      codeCompte: '4010',
-      programme: 'Pion joues-tu?',
-      projet: 'PJT-2026'
-    },
-    'Forfait Cartier': {
-      codeCompte: '4010',
-      programme: 'Pion joues-tu? – Cartier',
-      projet: 'PJC-2026'
-    },
-    'T-shirt': {
-      codeCompte: '4020',
-      programme: 'Marchandise',
-      projet: ''
-    },
-    'Chandail à manches longues': {
-      codeCompte: '4020',
-      programme: 'Marchandise',
-      projet: ''
-    },
-    'Hoodie': {
-      codeCompte: '4020',
-      programme: 'Marchandise',
-      projet: ''
-    }
-  };
-
+function developperEcrituresComptablesMixtes_(lignesActives, compiledMap) {
   const resultat = [];
 
   lignesActives.forEach(function(ligne) {
     const composante = String(ligne.valeurs[5] || '').trim();
-    const montant = arrondirMontantMixte_(
-      Number(ligne.valeurs[8] || 0)
-    );
+    const montant    = arrondirMontantMixte_(Number(ligne.valeurs[8] || 0));
 
-    if (composante === 'Forfait combiné') {
-      const partPion = arrondirMontantMixte_(montant * 0.6);
-      const partCartier = arrondirMontantMixte_(montant - partPion);
+    const compiled = compiledMap.byLibelle[composante];
 
-      resultat.push({
-        numeroLigneSource: ligne.numero,
-        description: 'Forfait combiné – part Pion joues-tu?',
-        montant: partPion,
-        codeCompte: '4010',
-        programme: 'Pion joues-tu?',
-        projet: 'PJT-2026'
-      });
-
-      resultat.push({
-        numeroLigneSource: ligne.numero,
-        description: 'Forfait combiné – part Cartier',
-        montant: partCartier,
-        codeCompte: '4010',
-        programme: 'Pion joues-tu? – Cartier',
-        projet: 'PJC-2026'
-      });
-
-      return;
-    }
-
-    const definition = definitions[composante];
-
-    if (!definition) {
+    if (!compiled) {
       throw new Error(
-        'La composante « ' + composante + ' » n’est pas reconnue.'
+        'La composante « ' + composante + ' » n\'est pas reconnue. ' +
+        'Vérifiez la section Composantes de classement dans Configuration.'
       );
     }
 
-    resultat.push({
-      numeroLigneSource: ligne.numero,
-      description: composante,
-      montant: montant,
-      codeCompte: definition.codeCompte,
-      programme: definition.programme,
-      projet: definition.projet
+    const def = compiled.definition;
+    const repartitions = compiled.repartitions;
+
+    if (repartitions.length === 0) {
+      throw new Error(
+        'La composante « ' + composante + ' » n\'a aucune répartition active pour cette saison.'
+      );
+    }
+
+    // Allouer les parts et absorber l'écart d'arrondi dans la dernière
+    var totalAlloue = 0;
+
+    repartitions.forEach(function(rep, i) {
+      var codeCompte = rep.compteSubstitut || def.codeCompte;
+      var montantPart;
+
+      if (i === repartitions.length - 1) {
+        // Dernière répartition : absorbe le solde restant
+        montantPart = arrondirMontantMixte_(montant - totalAlloue);
+      } else {
+        montantPart = arrondirMontantMixte_(montant * rep.part / 100);
+        totalAlloue += montantPart;
+      }
+
+      var description = repartitions.length === 1
+        ? composante
+        : composante + ' – ' + rep.programme;
+
+      resultat.push({
+        numeroLigneSource: ligne.numero,
+        description:       description,
+        montant:           montantPart,
+        codeCompte:        codeCompte,
+        programme:         rep.programme,
+        projet:            rep.projet
+      });
     });
   });
 
@@ -2285,13 +2250,24 @@ function ecrirePaireJournalCoutMixte_(
   const description = 'Coût des marchandises vendues – ' +
     mouvement.composante;
 
+  const cpteVentes = mouvement.compteVentes;
+  const cpteInv    = mouvement.compteInventaire;
+
+  if (!cpteVentes || !cpteInv) {
+    throw new Error(
+      'Comptes CMV non configurés pour la composante « ' +
+      mouvement.composante + ' ». ' +
+      'Vérifiez Compte coût des ventes et Compte inventaire dans Configuration.'
+    );
+  }
+
   ecrireLigneJournalMixte_(
     journal,
     planComptable,
     'ECR-' + idTransaction + '-CMV-D',
     idTransaction,
     dateTransaction,
-    '5000',
+    cpteVentes,
     coutTotal,
     0,
     'Marchandise',
@@ -2305,7 +2281,7 @@ function ecrirePaireJournalCoutMixte_(
     'ECR-' + idTransaction + '-CMV-C',
     idTransaction,
     dateTransaction,
-    '1300',
+    cpteInv,
     0,
     coutTotal,
     'Marchandise',
@@ -2374,7 +2350,8 @@ function creerForfaitDepuisRepartitionMixte_(
   acheteur,
   typeForfait,
   montant,
-  idImport
+  idImport,
+  compiledComposante
 ) {
   const derniereLigne = feuille.getLastRow();
 
@@ -2385,7 +2362,6 @@ function creerForfaitDepuisRepartitionMixte_(
 
     const existe = existants.some(function(ligne) {
       const statut = String(ligne[8] || '').trim();
-
       return (
         String(ligne[5] || '').trim() === idImport &&
         String(ligne[3] || '').trim() === typeForfait &&
@@ -2395,9 +2371,20 @@ function creerForfaitDepuisRepartitionMixte_(
       );
     });
 
-    if (existe) {
-      return;
-    }
+    if (existe) return;
+  }
+
+  if (!compiledComposante) {
+    throw new Error(
+      'Composante « ' + typeForfait + ' » introuvable dans les composantes compilées.'
+    );
+  }
+
+  if (feuille.getMaxColumns() < 15) {
+    throw new Error(
+      'La feuille Forfaits ne possède que ' + feuille.getMaxColumns() + ' colonne(s) ' +
+      '(15 requises). Exécutez « Installer / mettre à jour les composantes ».'
+    );
   }
 
   const saison = dateVente instanceof Date
@@ -2406,53 +2393,44 @@ function creerForfaitDepuisRepartitionMixte_(
 
   const idForfait = genererProchainIdForfaitMixte_(feuille, saison);
   const ligne = prochaineLigneVideMixte_(feuille, 6);
-  const modele = feuille.getRange(6, 1, 1, 11);
-  const cible = feuille.getRange(ligne, 1, 1, 11);
 
-  modele.copyTo(
+  // Copier format et validation depuis la ligne modèle (cols 1-11 suffisent)
+  const modele = feuille.getRange(6, 1, 1, 11);
+  const cible  = feuille.getRange(ligne, 1, 1, 15);
+
+  feuille.getRange(6, 1, 1, 11).copyTo(
     cible,
     SpreadsheetApp.CopyPasteType.PASTE_FORMAT,
     false
   );
-  modele.copyTo(
+  feuille.getRange(6, 1, 1, 11).copyTo(
     cible,
     SpreadsheetApp.CopyPasteType.PASTE_DATA_VALIDATION,
     false
   );
 
-  const formulePion =
-    '=IF($A' +
-    ligne +
-    '="","",IF(OR($I' +
-    ligne +
-    '="Annulé",$I' +
-    ligne +
-    '="Remboursé"),0,IF($D' +
-    ligne +
-    '="Forfait Pion joues-tu?",$E' +
-    ligne +
-    ',IF($D' +
-    ligne +
-    '="Forfait combiné",$E' +
-    ligne +
-    '*0.6,0))))';
+  // Calculer les parts Pion / Cartier depuis les répartitions configurées
+  var partPion    = 0;
+  var partCartier = 0;
+  var projetsVus  = {};
+  var projetsList = [];
 
-  const formuleCartier =
-    '=IF($A' +
-    ligne +
-    '="","",IF(OR($I' +
-    ligne +
-    '="Annulé",$I' +
-    ligne +
-    '="Remboursé"),0,IF($D' +
-    ligne +
-    '="Forfait Cartier",$E' +
-    ligne +
-    ',IF($D' +
-    ligne +
-    '="Forfait combiné",$E' +
-    ligne +
-    '*0.4,0))))';
+  compiledComposante.repartitions.forEach(function(r) {
+    if (PROGRAMMES_PION_.indexOf(r.programme) !== -1) {
+      partPion += r.part;
+    } else if (PROGRAMMES_CARTIER_.indexOf(r.programme) !== -1) {
+      partCartier += r.part;
+    }
+    if (r.projet && !projetsVus[r.projet]) {
+      projetsVus[r.projet] = true;
+      projetsList.push(r.projet);
+    }
+  });
+
+  // Formules G/H : part calculée depuis les colonnes M/N de la même ligne
+  var prefixe = '=IF($A' + ligne + '="","",IF(OR($I' + ligne + '="Annulé",$I' + ligne + '="Remboursé"),0,';
+  var formulePion    = prefixe + 'IFERROR($E' + ligne + '*$M' + ligne + '/100,0)))';
+  var formuleCartier = prefixe + 'IFERROR($E' + ligne + '*$N' + ligne + '/100,0)))';
 
   cible.setValues([[
     idForfait,
@@ -2465,19 +2443,35 @@ function creerForfaitDepuisRepartitionMixte_(
     formuleCartier,
     'Actif',
     'Créé depuis une transaction mixte',
-    saison
+    saison,
+    compiledComposante.definition.id,
+    partPion,
+    partCartier,
+    projetsList.join(' / ')
   ]]);
 }
 
 function preparerMouvementsInventaireMixte_(
   inventaire,
-  lignesActives
+  lignesActives,
+  compiledMap
 ) {
-  const correspondances = {
-    'T-shirt': 'MERCH-TS-NOIR',
-    'Chandail à manches longues': 'MERCH-LS-NOIR',
-    'Hoodie': 'MERCH-HD-NOIR'
-  };
+  // Construire la correspondance libellé → UGS depuis les composantes compilées
+  const correspondances = {};
+  const defsCpteParLibelle = {};
+  if (compiledMap && compiledMap.byLibelle) {
+    Object.keys(compiledMap.byLibelle).forEach(function(libelle) {
+      var c = compiledMap.byLibelle[libelle];
+      var def = c.definition;
+      if (def.ugsInventaire) {
+        correspondances[libelle] = def.ugsInventaire;
+        defsCpteParLibelle[libelle] = {
+          compteVentes: def.compteVentes,
+          compteInventaire: def.compteInventaire
+        };
+      }
+    });
+  }
 
   const derniereLigne = inventaire.getLastRow();
   const valeurs = derniereLigne >= 6
@@ -2548,6 +2542,13 @@ function preparerMouvementsInventaireMixte_(
       );
     }
 
+    var cptes = defsCpteParLibelle[mouvement.composante];
+    if (!cptes || !cptes.compteVentes || !cptes.compteInventaire) {
+      throw new Error(
+        'Comptes CMV non configurés pour « ' + mouvement.composante + ' ». ' +
+        'Vérifiez Compte coût des ventes et Compte inventaire dans Configuration.'
+      );
+    }
     mouvements.push({
       ugs: ugs,
       composante: mouvement.composante,
@@ -2556,7 +2557,9 @@ function preparerMouvementsInventaireMixte_(
       numeroLigneSource: mouvement.numerosLignesSources[0],
       ligneInventaire: article.ligne,
       ventesActuelles: article.ventesActuelles,
-      coutUnitaire: article.coutUnitaire
+      coutUnitaire: article.coutUnitaire,
+      compteVentes:     cptes.compteVentes,
+      compteInventaire: cptes.compteInventaire
     });
   });
 
@@ -2702,7 +2705,7 @@ function nettoyerTraitementPartielMixte_(
   });
 
   lignesForfaits.forEach(function(numeroLigne) {
-    forfaits.getRange(numeroLigne, 1, 1, 11).clearContent();
+    forfaits.getRange(numeroLigne, 1, 1, 15).clearContent();
   });
 
   if (
@@ -2784,16 +2787,34 @@ function chargerPlanComptableMixte_(configuration) {
   return plan;
 }
 
-function verifierComptesRequisMixte_(planComptable) {
-  ['1000', '1300', '4000', '4010', '4020', '5000'].forEach(
-    function(code) {
-      if (!planComptable[code]) {
-        throw new Error(
-          'Le compte requis ' + code + ' est absent du plan comptable.'
-        );
-      }
+function verifierComptesRequisMixte_(planComptable, compiledMap) {
+  if (!planComptable['1000']) {
+    throw new Error('Le compte requis 1000 est absent du plan comptable.');
+  }
+
+  if (!compiledMap || !compiledMap.ordered || compiledMap.ordered.length === 0) {
+    throw new Error(
+      'Aucune composante configurée. ' +
+      'Exécutez « Installer / mettre à jour les composantes ».'
+    );
+  }
+
+  const codesRequis = {};
+  compiledMap.ordered.forEach(function(c) {
+    var def = c.definition;
+    if (def.codeCompte)       codesRequis[String(def.codeCompte).trim()]       = true;
+    if (def.compteVentes)     codesRequis[String(def.compteVentes).trim()]     = true;
+    if (def.compteInventaire) codesRequis[String(def.compteInventaire).trim()] = true;
+    c.repartitions.forEach(function(r) {
+      if (r.compteSubstitut) codesRequis[String(r.compteSubstitut).trim()] = true;
+    });
+  });
+
+  Object.keys(codesRequis).forEach(function(code) {
+    if (code && !planComptable[code]) {
+      throw new Error('Le compte requis ' + code + ' est absent du plan comptable.');
     }
-  );
+  });
 }
 
 function genererProchainIdForfaitMixte_(feuille, saison) {
@@ -2883,12 +2904,15 @@ function extraireNomInteracMixte_(description) {
   return texte || 'Client';
 }
 
-function estForfaitMixte_(composante) {
-  return [
-    'Forfait Pion joues-tu?',
-    'Forfait Cartier',
-    'Forfait combiné'
-  ].indexOf(composante) !== -1;
+function estForfaitMixte_(composante, compiledMap) {
+  if (!compiledMap || !compiledMap.byLibelle) {
+    throw new Error(
+      'Module composantes non initialisé. ' +
+      'Exécutez « Installer / mettre à jour les composantes ».'
+    );
+  }
+  var c = compiledMap.byLibelle[composante];
+  return c ? Boolean(c.definition.creeForfait) : false;
 }
 
 function obtenirFeuilleMixte_(ss, nom) {
@@ -3467,8 +3491,14 @@ function enregistrerRepartitionDepenseMixte_(feuille, valeursImport, lignes, opt
     for (let index = 0; index < lignes.length; index += 1) {
       const numero = debut + index;
       const ligne = lignes[index];
-      const entreeCompte = planComptable[ligne.compte] || {};
-      const nomCompte = entreeCompte.nom || ligne.compte;
+      const entreeCompte = planComptable[ligne.compte];
+      // J = nom du compte — jamais un code brut.
+      if (!entreeCompte || !entreeCompte.nom) {
+        throw new Error(
+          'Compte « ' + ligne.compte + ' » absent du plan comptable — impossible d\'écrire la colonne J.'
+        );
+      }
+      const nomCompte = entreeCompte.nom;
 
       feuille.getRange(numero, 1, 1, 5).setValues([[
         idImport,
@@ -4428,8 +4458,14 @@ function enregistrerRepartitionRevenuDirectMixte_(
     for (let index = 0; index < lignes.length; index += 1) {
       const numero = debut + index;
       const ligne = lignes[index];
-      const entreeCompte = planComptable[ligne.compte] || {};
-      const nomCompte = entreeCompte.nom || ligne.compte;
+      const entreeCompte = planComptable[ligne.compte];
+      // J = nom du compte — jamais un code brut.
+      if (!entreeCompte || !entreeCompte.nom) {
+        throw new Error(
+          'Compte « ' + ligne.compte + ' » absent du plan comptable — impossible d\'écrire la colonne J.'
+        );
+      }
+      const nomCompte = entreeCompte.nom;
 
       feuille.getRange(numero, 1, 1, 5).setValues([[
         idImport,

@@ -36,6 +36,10 @@ function onOpen() {
       'installerGestionFournisseursContacts'
     )
     .addItem(
+      'Installer / mettre à jour les composantes',
+      'installerComposantesConfigurables'
+    )
+    .addItem(
       'Installer les règles bancaires',
       'installerReglesBancairesConfigurables'
     )
@@ -1152,29 +1156,26 @@ function installerModuleRepartition() {
     .setFontWeight('bold')
     .setWrap(true);
 
-  const composantes = [
-    'Entrée – Pion joues-tu?',
-    'Entrée – Cartier',
-    'Forfait Pion joues-tu?',
-    'Forfait Cartier',
-    'Forfait combiné',
-    'T-shirt',
-    'Chandail à manches longues',
-    'Hoodie'
-  ];
+  // Validation composante : liste active depuis Configuration AA:AT
+  const defsComp = chargerDefinitionsComposantes_(classeur, { inclureInactives: false });
+  const composantes = defsComp.map(function(d) { return d.libelle; });
 
-  const validationComposante = SpreadsheetApp.newDataValidation()
-    .requireValueInList(composantes, true)
-    .setAllowInvalid(false)
-    .build();
+  const validationComposante = composantes.length
+    ? SpreadsheetApp.newDataValidation()
+        .requireValueInList(composantes, true)
+        .setAllowInvalid(false)
+        .build()
+    : null;
 
   const premiereLigne = 6;
   const derniereLigne = repartition.getMaxRows();
   const nombreLignes = derniereLigne - premiereLigne + 1;
 
-  repartition
-    .getRange(premiereLigne, 6, nombreLignes, 1)
-    .setDataValidation(validationComposante);
+  if (validationComposante) {
+    repartition
+      .getRange(premiereLigne, 6, nombreLignes, 1)
+      .setDataValidation(validationComposante);
+  }
 
   // Montant attribué = quantité × prix
   repartition
@@ -1183,26 +1184,8 @@ function installerModuleRepartition() {
       '=IF(OR(RC1="",RC6=""),"",RC7*RC8)'
     );
 
-  // Compte de revenu
-  repartition
-    .getRange(premiereLigne, 10, nombreLignes, 1)
-    .setFormulaR1C1(
-      '=IF(RC1="","",IF(OR(RC6="Entrée – Pion joues-tu?",RC6="Entrée – Cartier"),"Revenus d\'entrées aux événements",IF(OR(RC6="Forfait Pion joues-tu?",RC6="Forfait Cartier",RC6="Forfait combiné"),"Revenus de laissez-passer et forfaits",IF(OR(RC6="T-shirt",RC6="Chandail à manches longues",RC6="Hoodie"),"Ventes de marchandises et de jeux",""))))'
-    );
-
-  // Programme
-  repartition
-    .getRange(premiereLigne, 11, nombreLignes, 1)
-    .setFormulaR1C1(
-      '=IF(RC1="","",IF(OR(RC6="Entrée – Pion joues-tu?",RC6="Forfait Pion joues-tu?"),"Pion joues-tu?",IF(OR(RC6="Entrée – Cartier",RC6="Forfait Cartier"),"Pion joues-tu? – Cartier",IF(OR(RC6="T-shirt",RC6="Chandail à manches longues",RC6="Hoodie"),"Marchandise",""))))'
-    );
-
-  // Projet annuel
-  repartition
-    .getRange(premiereLigne, 12, nombreLignes, 1)
-    .setFormulaR1C1(
-      '=IF(RC11="Pion joues-tu?","PJT-2026",IF(RC11="Pion joues-tu? – Cartier","PJC-2026",""))'
-    );
+  // J, K, L : colonnes de synthèse écrites par le serveur lors de la finalisation.
+  // Aucune formule — le serveur inscrit directement le nom de compte, le programme et le projet.
 
   // Somme de toutes les composantes de la même transaction
   repartition
