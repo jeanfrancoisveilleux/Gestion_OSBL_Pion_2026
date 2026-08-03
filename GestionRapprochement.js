@@ -1,4 +1,4 @@
-// ─── Rapprochement bancaire mensuel — Phase 3A ───────────────────────────────
+// ─── Rapprochement bancaire mensuel — Phase 3B ───────────────────────────────
 
 const CONFIG_RAPPROCHEMENT = {
   nomFeuille: 'Rapprochement bancaire',
@@ -622,7 +622,7 @@ function preparerOngletRapprochement_(ss) {
     .setBackground('#e8f0fe');
 
   feuille.getRange('A3')
-    .setValue('Phase 3A — Tableau de contrôle')
+    .setValue('Phase 3B — Rapprochement et clôture mensuelle')
     .setFontColor('#5f6368');
 
   const entetes = [
