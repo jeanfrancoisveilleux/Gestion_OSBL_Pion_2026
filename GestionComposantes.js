@@ -787,8 +787,10 @@ function validerConfigurationComposantes_(ss) {
         var code = String(l[0] || '').trim();
         if (code) planComptable[code] = String(l[1] || '').trim();
       });
-    feuille.getRange(6, 8, Math.max(1, feuille.getLastRow() - 5), 1).getDisplayValues()
-      .forEach(function(l) { var p = String(l[0] || '').trim(); if (p) programmes.add(p); });
+    // Configuration H:I — H = code (PJ, PJC…), I = libellé (Pion joues-tu?…).
+    // Les répartitions stockent le LIBELLÉ (colonne I), jamais le code.
+    feuille.getRange(6, 8, Math.max(1, feuille.getLastRow() - 5), 2).getDisplayValues()
+      .forEach(function(l) { var p = String(l[1] || '').trim(); if (p) programmes.add(p); });
   }
 
   var ugsSet = new Set();
@@ -995,8 +997,9 @@ function appliquerValidationsComposantes_(ss) {
 
     var progList = [];
     if (feuille.getLastRow() >= 6) {
-      feuille.getRange(6, 8, Math.max(1, feuille.getLastRow() - 5), 1).getDisplayValues()
-        .forEach(function(l) { var p = String(l[0]||'').trim(); if (p) progList.push(p); });
+      // Configuration H:I — proposer les libellés (col I), pas les codes (col H).
+      feuille.getRange(6, 8, Math.max(1, feuille.getLastRow() - 5), 2).getDisplayValues()
+        .forEach(function(l) { var p = String(l[1]||'').trim(); if (p) progList.push(p); });
     }
     if (progList.length > 0) {
       feuille.getRange(C.REP_PREMIERE_LIGNE, C.REP_COL_DEBUT + C.REP_IDX_PROGRAMME, nbRep, 1).setDataValidation(vlListe(progList, true));
