@@ -1107,6 +1107,15 @@ function preparerForfaitsExtendus_(ss) {
     feuille.getRange(6, 13, maxLigne - 5, 2).setNumberFormat('0.##');
   }
 
+  // 3b. Réparer les validations L:O (idempotent, avant toute migration ou écriture).
+  //     Efface les validations héritées (notamment la validation de saison de K propagée
+  //     par copyTo source-11-vers-dest-15), puis pose les bonnes validations.
+  var allDefs = chargerDefinitionsComposantes_(ss, { inclureInactives: true });
+  if (maxLigne >= 6) {
+    var nbRangeRows3b = maxLigne - 5;
+    appliquerValidationsForfaitsEtendus_(ss, feuille, 6, nbRangeRows3b, allDefs);
+  }
+
   // 4. Migration L:O pour les lignes historiques (A non vide, L vide)
   //    Tout calculer en mémoire — aucune écriture avant la validation complète.
   var derniereLigneData = feuille.getLastRow();
@@ -1118,8 +1127,7 @@ function preparerForfaitsExtendus_(ss) {
   var nbDataRows   = derniereLigneData - 5;
   var dataForfaits = feuille.getRange(6, 1, nbDataRows, 15).getValues();
 
-  // Lectures groupées : composantes (incl. inactives) et répartitions
-  var allDefs = chargerDefinitionsComposantes_(ss, { inclureInactives: true });
+  // allDefs déjà chargé à l'étape 3b — charger uniquement les répartitions
   var allReps = chargerRepartitionsComposantes_(ss);
 
   var defParLibelle = {};
@@ -1135,6 +1143,10 @@ function preparerForfaitsExtendus_(ss) {
 
     var lVal = String(row[11] || '').trim();  // col L
     if (lVal) return;  // déjà migré, conserver
+
+    // Ignorer les forfaits créés par le nouveau système (création partielle suite à un classement échoué)
+    var notes3b = String(row[9] || '').trim();  // col J
+    if (notes3b.toLowerCase().indexOf('créé depuis une transaction mixte') !== -1) return;
 
     var libelle = String(row[3] || '').trim();   // col D
     var def     = defParLibelle[libelle];

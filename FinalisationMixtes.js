@@ -1209,6 +1209,10 @@ function enregistrerEtComptabiliserTransactionMixte(donnees) {
       'classer une transaction bancaire'
     );
 
+    verifierStructureForfaitsAvantEcriture_(
+      SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Forfaits')
+    );
+
     enregistrerRepartitionTechniqueMixte_(
       contexte.repartition,
       contexte.valeursImport,
@@ -1257,6 +1261,10 @@ function enregistrerRevisionTransactionMixte(donnees) {
       SpreadsheetApp.getActiveSpreadsheet(),
       contexte.valeursImport[1],
       'créer une révision de transaction bancaire'
+    );
+
+    verifierStructureForfaitsAvantEcriture_(
+      SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Forfaits')
     );
 
     annulerGroupeTransactionsOSBLSansVerrou_(
@@ -1888,6 +1896,11 @@ function finaliserTransactionMixteParId_(idImport, options) {
   const transactionParLigne = {};
   const transactionsCreees = [];
 
+  verifierStructureForfaitsAvantEcriture_(forfaits);
+  var inventaireApplique = false;
+
+  try {
+
   ecrituresComptables.forEach(function(ecriture, index) {
     const idTransaction =
       idGroupe + '-' + String(index + 1).padStart(2, '0');
@@ -1954,6 +1967,7 @@ function finaliserTransactionMixteParId_(idImport, options) {
     inventaire,
     mouvementsInventaire
   );
+  inventaireApplique = true;
 
   // Écrire J/K/L dans les lignes de Répartition depuis la composante compilée.
   // J = noms des comptes uniques (compte principal + compteSubstitut si différent).
@@ -2029,10 +2043,63 @@ function finaliserTransactionMixteParId_(idImport, options) {
   }
 
   SpreadsheetApp.flush();
+  return { idGroupe: idGroupe };
 
-  return {
-    idGroupe: idGroupe
-  };
+  } catch (erreurPrincipale) {
+    var erreursRollback = [];
+    var horodatageRollback = '';
+    try {
+      horodatageRollback = Utilities.formatDate(
+        new Date(), ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd HH:mm'
+      );
+    } catch (e) { horodatageRollback = 'erreur'; }
+
+    // 1. Transactions + Journal + Forfaits (G:H des forfaits préservées)
+    try {
+      nettoyerTraitementPartielMixte_(transactions, journal, forfaits, idImport, idGroupe);
+    } catch (e) { erreursRollback.push('Transactions/Journal/Forfaits : ' + e.message); }
+
+    // 2. Inventaire (uniquement si appliquerMouvementsInventaireMixte_ avait réussi en entier)
+    if (inventaireApplique && mouvementsInventaire.length > 0) {
+      try {
+        for (var ri = mouvementsInventaire.length - 1; ri >= 0; ri--) {
+          inventaire.getRange(mouvementsInventaire[ri].ligneInventaire, 6)
+            .setValue(Number(mouvementsInventaire[ri].ventesActuelles || 0));
+        }
+      } catch (e) { erreursRollback.push('Inventaire : ' + e.message); }
+    }
+
+    // 3. Répartition : neutraliser les lignes actives du traitement en échec.
+    //    A:H effacées · I (formule) préservée · J:L effacées · M:O (formules) préservées · P:Q effacées.
+    try {
+      lignesActives.forEach(function(ligne) {
+        repartition.getRange(ligne.numero, 1, 1, 8).clearContent();   // A:H
+        repartition.getRange(ligne.numero, 10, 1, 3).clearContent();  // J:L
+        repartition.getRange(ligne.numero, 16, 1, 2).clearContent();  // P:Q
+      });
+    } catch (e) { erreursRollback.push('Répartition : ' + e.message); }
+
+    // 4. Import bancaire
+    try {
+      var statutImportRollback = String(
+        importBancaire.getRange(ligneImport, 11).getValue() || ''
+      ).trim();
+      if (statutImportRollback === 'Classée') {
+        // Déjà marquée Classée — remettre proprement à « À classer »
+        remettreImportBancaireAClasser_(importBancaire, idImport, horodatageRollback);
+      } else {
+        // Pas encore Classée, mais le flag « Classer » (col O) a pu être posé
+        importBancaire.getRange(ligneImport, 15).clearContent();
+      }
+    } catch (e) { erreursRollback.push('Import bancaire : ' + e.message); }
+
+    try { SpreadsheetApp.flush(); } catch (e) {}
+    var msgFinal = erreurPrincipale.message;
+    if (erreursRollback.length > 0) {
+      msgFinal += '\n[Rollback] ' + erreursRollback.join('; ');
+    }
+    throw new Error(msgFinal);
+  }
 }
 
 function developperEcrituresComptablesMixtes_(lignesActives, compiledMap) {
@@ -2408,6 +2475,8 @@ function creerForfaitDepuisRepartitionMixte_(
     SpreadsheetApp.CopyPasteType.PASTE_DATA_VALIDATION,
     false
   );
+  // Effacer et réinstaller les validations L:M:N (O reste sans validation)
+  appliquerValidationsForfaitsEtendus_(SpreadsheetApp.getActiveSpreadsheet(), feuille, ligne, 1);
 
   // Calculer les parts Pion / Cartier depuis les répartitions configurées
   var partPion    = 0;
@@ -2432,23 +2501,31 @@ function creerForfaitDepuisRepartitionMixte_(
   var formulePion    = prefixe + 'IFERROR($E' + ligne + '*$M' + ligne + '/100,0)))';
   var formuleCartier = prefixe + 'IFERROR($E' + ligne + '*$N' + ligne + '/100,0)))';
 
-  cible.setValues([[
-    idForfait,
-    dateVente,
-    acheteur,
-    typeForfait,
-    arrondirMontantMixte_(montant),
-    idImport,
-    formulePion,
-    formuleCartier,
-    'Actif',
-    'Créé depuis une transaction mixte',
-    saison,
-    compiledComposante.definition.id,
-    partPion,
-    partCartier,
-    projetsList.join(' / ')
-  ]]);
+  try {
+    cible.setValues([[
+      idForfait,
+      dateVente,
+      acheteur,
+      typeForfait,
+      arrondirMontantMixte_(montant),
+      idImport,
+      formulePion,
+      formuleCartier,
+      'Actif',
+      'Créé depuis une transaction mixte',
+      saison,
+      compiledComposante.definition.id,
+      partPion,
+      partCartier,
+      projetsList.join(' / ')
+    ]]);
+  } catch (erreurSetValues) {
+    try {
+      feuille.getRange(ligne, 1, 1, 6).clearContent();  // A:F
+      feuille.getRange(ligne, 9, 1, 7).clearContent();  // I:O
+    } catch (e) {}
+    throw erreurSetValues;
+  }
 }
 
 function preparerMouvementsInventaireMixte_(
@@ -2570,14 +2647,31 @@ function appliquerMouvementsInventaireMixte_(
   inventaire,
   mouvements
 ) {
-  mouvements.forEach(function(mouvement) {
-    inventaire
-      .getRange(mouvement.ligneInventaire, 6)
-      .setValue(
-        Number(mouvement.ventesActuelles || 0) +
-        Number(mouvement.quantite || 0)
+  var appliques = [];
+  try {
+    mouvements.forEach(function(mouvement) {
+      inventaire.getRange(mouvement.ligneInventaire, 6).setValue(
+        Number(mouvement.ventesActuelles || 0) + Number(mouvement.quantite || 0)
       );
-  });
+      appliques.push(mouvement);
+    });
+  } catch (erreurApplication) {
+    var erreursRestauration = [];
+    for (var ri = appliques.length - 1; ri >= 0; ri--) {
+      try {
+        inventaire.getRange(appliques[ri].ligneInventaire, 6)
+          .setValue(Number(appliques[ri].ventesActuelles || 0));
+      } catch (e) {
+        erreursRestauration.push('ligne ' + appliques[ri].ligneInventaire + ' : ' + e.message);
+      }
+    }
+    try { SpreadsheetApp.flush(); } catch (e) {}
+    var msgInv = erreurApplication.message;
+    if (erreursRestauration.length > 0) {
+      msgInv += '\n[Inventaire] Restauration partielle échouée : ' + erreursRestauration.join('; ');
+    }
+    throw new Error(msgInv);
+  }
 }
 
 function lireLignesRepartitionMixte_(feuille, idImport) {
@@ -2697,15 +2791,21 @@ function nettoyerTraitementPartielMixte_(
   }
 
   lignesTransactions.forEach(function(numeroLigne) {
-    transactions.getRange(numeroLigne, 1, 1, 20).clearContent(); // A:T
+    transactions.getRange(numeroLigne, 1, 1, 15).clearContent();  // A:O
+    // P:Q (cols 16-17) : formules préservées
+    transactions.getRange(numeroLigne, 18, 1, 3).clearContent();  // R:T
   });
 
   lignesJournal.forEach(function(numeroLigne) {
-    journal.getRange(numeroLigne, 1, 1, 16).clearContent();
+    journal.getRange(numeroLigne, 1, 1, 13).clearContent();  // A:M
+    // N (col 14) : formule préservée
+    journal.getRange(numeroLigne, 15, 1, 2).clearContent();  // O:P
   });
 
   lignesForfaits.forEach(function(numeroLigne) {
-    forfaits.getRange(numeroLigne, 1, 1, 15).clearContent();
+    forfaits.getRange(numeroLigne, 1, 1, 6).clearContent();  // A:F
+    // G:H (cols 7-8) : formules préservées
+    forfaits.getRange(numeroLigne, 9, 1, 7).clearContent();  // I:O
   });
 
   if (
@@ -2714,6 +2814,131 @@ function nettoyerTraitementPartielMixte_(
     lignesForfaits.length
   ) {
     SpreadsheetApp.flush();
+  }
+}
+
+function appliquerValidationsForfaitsEtendus_(ss, feuille, premiereLigne, nbLignes, optDefs) {
+  var defs = optDefs || chargerDefinitionsComposantes_(ss, { inclureInactives: true });
+  var idsComp = defs.map(function(d) { return d.id; }).filter(Boolean);
+  feuille.getRange(premiereLigne, 12, nbLignes, 4).clearDataValidations();
+  if (idsComp.length > 0) {
+    feuille.getRange(premiereLigne, 12, nbLignes, 1).setDataValidation(
+      SpreadsheetApp.newDataValidation()
+        .requireValueInList(idsComp, true)
+        .setAllowInvalid(false)
+        .build()
+    );
+  }
+  var vlNumMN = SpreadsheetApp.newDataValidation()
+    .requireNumberBetween(0, 100)
+    .setAllowInvalid(false)
+    .build();
+  feuille.getRange(premiereLigne, 13, nbLignes, 1).setDataValidation(vlNumMN);
+  feuille.getRange(premiereLigne, 14, nbLignes, 1).setDataValidation(vlNumMN);
+  // O (col 15) : déjà effacée par clearDataValidations ci-dessus — aucune validation posée
+}
+
+function verifierStructureForfaitsAvantEcriture_(forfaits) {
+  if (!forfaits) {
+    throw new Error(
+      'La feuille Forfaits est introuvable. ' +
+      'Exécutez « Installer / mettre à jour les composantes » avant de classer.'
+    );
+  }
+  if (forfaits.getMaxColumns() < 15) {
+    throw new Error(
+      'La feuille Forfaits ne possède que ' + forfaits.getMaxColumns() +
+      ' colonne(s) (15 requises). ' +
+      'Exécutez « Installer / mettre à jour les composantes » avant de classer.'
+    );
+  }
+  // En-têtes L5:O5 exacts
+  var row5LO = forfaits.getRange(5, 12, 1, 4).getDisplayValues()[0];
+  var ENTETES_LO_GARDE = ['ID composante', 'Part Pion joues-tu? (%)', 'Part Cartier (%)', 'Projet(s)'];
+  var NOMS_COLS_GARDE  = ['L', 'M', 'N', 'O'];
+  var mauvaisEntetes = [];
+  row5LO.forEach(function(v, i) {
+    if (String(v || '').trim() !== ENTETES_LO_GARDE[i]) {
+      mauvaisEntetes.push(NOMS_COLS_GARDE[i] + '5 (lu « ' + String(v || '') + ' »)');
+    }
+  });
+  if (mauvaisEntetes.length > 0) {
+    throw new Error(
+      'En-têtes Forfaits!L5:O5 incorrectes — ' + mauvaisEntetes.join(', ') + '. ' +
+      'Exécutez « Installer / mettre à jour les composantes ».'
+    );
+  }
+  // Validations L:O sur la première ligne allouée (ligne 6) — vérifications positives exactes
+  if (forfaits.getMaxRows() >= 6) {
+    // L : doit être VALUE_IN_LIST, stricte (allowInvalid = false)
+    var dvL = forfaits.getRange(6, 12, 1, 1).getDataValidation();
+    if (!dvL || dvL.getCriteriaType() !== SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+      throw new Error(
+        'Forfaits!L6 n\'a pas la validation de liste des IDs composantes. ' +
+        'Type actuel : ' + (dvL ? dvL.getCriteriaType() : 'aucune validation') + '. ' +
+        'Exécutez « Installer / mettre à jour les composantes ».'
+      );
+    }
+    if (dvL.getAllowInvalid()) {
+      throw new Error(
+        'Forfaits!L6 : la validation doit être stricte (allowInvalid = false). ' +
+        'Exécutez « Installer / mettre à jour les composantes ».'
+      );
+    }
+    // M : doit être NUMBER_BETWEEN 0-100, stricte
+    var dvM = forfaits.getRange(6, 13, 1, 1).getDataValidation();
+    if (!dvM || dvM.getCriteriaType() !== SpreadsheetApp.DataValidationCriteria.NUMBER_BETWEEN) {
+      throw new Error(
+        'Forfaits!M6 n\'a pas la validation NUMBER_BETWEEN. ' +
+        'Type actuel : ' + (dvM ? dvM.getCriteriaType() : 'aucune validation') + '. ' +
+        'Exécutez « Installer / mettre à jour les composantes ».'
+      );
+    }
+    var argsM = dvM.getCriteriaValues();
+    if (Number(argsM[0]) !== 0 || Number(argsM[1]) !== 100) {
+      throw new Error(
+        'Forfaits!M6 : la validation NUMBER_BETWEEN doit être [0, 100] (lu [' +
+        argsM[0] + ', ' + argsM[1] + ']). ' +
+        'Exécutez « Installer / mettre à jour les composantes ».'
+      );
+    }
+    if (dvM.getAllowInvalid()) {
+      throw new Error(
+        'Forfaits!M6 : la validation doit être stricte (allowInvalid = false). ' +
+        'Exécutez « Installer / mettre à jour les composantes ».'
+      );
+    }
+    // N : doit être NUMBER_BETWEEN 0-100, stricte
+    var dvN = forfaits.getRange(6, 14, 1, 1).getDataValidation();
+    if (!dvN || dvN.getCriteriaType() !== SpreadsheetApp.DataValidationCriteria.NUMBER_BETWEEN) {
+      throw new Error(
+        'Forfaits!N6 n\'a pas la validation NUMBER_BETWEEN. ' +
+        'Type actuel : ' + (dvN ? dvN.getCriteriaType() : 'aucune validation') + '. ' +
+        'Exécutez « Installer / mettre à jour les composantes ».'
+      );
+    }
+    var argsN = dvN.getCriteriaValues();
+    if (Number(argsN[0]) !== 0 || Number(argsN[1]) !== 100) {
+      throw new Error(
+        'Forfaits!N6 : la validation NUMBER_BETWEEN doit être [0, 100] (lu [' +
+        argsN[0] + ', ' + argsN[1] + ']). ' +
+        'Exécutez « Installer / mettre à jour les composantes ».'
+      );
+    }
+    if (dvN.getAllowInvalid()) {
+      throw new Error(
+        'Forfaits!N6 : la validation doit être stricte (allowInvalid = false). ' +
+        'Exécutez « Installer / mettre à jour les composantes ».'
+      );
+    }
+    // O : doit être sans validation
+    var dvO = forfaits.getRange(6, 15, 1, 1).getDataValidation();
+    if (dvO) {
+      throw new Error(
+        'Forfaits!O6 a une validation inattendue (type : ' + dvO.getCriteriaType() + '). ' +
+        'Exécutez « Installer / mettre à jour les composantes ».'
+      );
+    }
   }
 }
 
