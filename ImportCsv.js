@@ -1684,25 +1684,6 @@ function importerTransactionsBancaires_(
         ancienneMax,
         ligneFinale - ancienneMax
       );
-      if (ancienneMax >= 6) {
-        feuille
-          .getRange(
-            6,
-            23,
-            1,
-            11
-          )
-          .copyTo(
-            feuille.getRange(
-              ancienneMax + 1,
-              23,
-              ligneFinale - ancienneMax,
-              11
-            ),
-            SpreadsheetApp.CopyPasteType.PASTE_NORMAL,
-            false
-          );
-      }
     }
     feuille
       .getRange(
@@ -1712,6 +1693,27 @@ function importerTransactionsBancaires_(
         13
       )
       .setValues(nouvellesLignes);
+
+    // Toujours preparer les colonnes V2 W:AG pour chaque nouveau lot importe.
+    // La ligne 6 sert de modele pour les formules, validations et formats.
+    // Cette copie doit se faire meme si la feuille possede deja assez de lignes.
+    feuille
+      .getRange(
+        6,
+        23,
+        1,
+        11
+      )
+      .copyTo(
+        feuille.getRange(
+          ligneDepart,
+          23,
+          nouvellesLignes.length,
+          11
+        ),
+        SpreadsheetApp.CopyPasteType.PASTE_NORMAL,
+        false
+      );
     feuille
       .getRange(
         ligneDepart,

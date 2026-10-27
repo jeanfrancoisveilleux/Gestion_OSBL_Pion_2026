@@ -817,6 +817,7 @@ function verifierSysteme() {
     'Contacts',
     'Configuration',
     '_Ventilation auto',
+    '_Listes V2',
     'Rapports',
     'Inventaire',
     'Budgets',
