@@ -2,116 +2,38 @@
 <html>
 <head>
   <base target="_top">
-
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      color: #202124;
-      margin: 0;
-      padding: 16px;
-      background: #fff;
-    }
-
-    h2 {
-      margin: 0 0 6px;
-      font-size: 20px;
-    }
-
-    .introduction {
-      color: #5f6368;
-      font-size: 13px;
-      margin-bottom: 18px;
-    }
-
-    label {
-      display: block;
-      font-size: 13px;
-      font-weight: 600;
-      margin: 13px 0 5px;
-    }
-
-    input,
-    select,
-    textarea {
-      box-sizing: border-box;
-      width: 100%;
-      min-height: 42px;
-      padding: 9px;
-      border: 1px solid #dadce0;
-      border-radius: 6px;
-      background: #fff;
-      font-size: 15px;
-    }
-
-    textarea {
-      min-height: 70px;
-      resize: vertical;
-    }
-
-    input:focus,
-    select:focus,
-    textarea:focus {
-      border-color: #1a73e8;
-      outline: none;
-      box-shadow: 0 0 0 1px #1a73e8;
-    }
-
-    .aide {
-      color: #5f6368;
-      font-size: 11px;
-      margin-top: 4px;
-    }
-
-    button {
-      width: 100%;
-      min-height: 46px;
-      margin-top: 20px;
-      border: none;
-      border-radius: 6px;
-      background: #1a73e8;
-      color: white;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-
-    button:disabled {
-      background: #9aa0a6;
-      cursor: wait;
-    }
-
-    .message {
-      display: none;
-      padding: 11px;
-      border-radius: 6px;
-      margin-bottom: 14px;
-      font-size: 13px;
-    }
-
-    .succes {
-      display: block;
-      color: #137333;
-      background: #e6f4ea;
-    }
-
-    .erreur {
-      display: block;
-      color: #b3261e;
-      background: #fce8e6;
-    }
-
-    .chargement {
-      color: #5f6368;
-      font-size: 13px;
-    }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; color:#202124; margin:0; padding:16px; background:#fff; }
+    h2 { margin:0 0 6px; font-size:20px; }
+    .introduction { color:#5f6368; font-size:13px; margin-bottom:18px; line-height:1.4; }
+    label { display:block; font-size:13px; font-weight:600; margin:13px 0 5px; }
+    input, select, textarea { width:100%; min-height:42px; padding:9px; border:1px solid #dadce0; border-radius:6px; background:#fff; font-size:15px; }
+    textarea { min-height:70px; resize:vertical; }
+    input:focus, select:focus, textarea:focus { border-color:#1a73e8; outline:none; box-shadow:0 0 0 1px #1a73e8; }
+    .aide { color:#5f6368; font-size:11px; margin-top:4px; line-height:1.35; }
+    .ligne-tiers { display:grid; grid-template-columns:1fr auto; gap:7px; align-items:stretch; }
+    .petit-bouton { width:auto; min-width:88px; min-height:42px; margin:0; padding:0 12px; background:#fff; color:#1a73e8; border:1px solid #1a73e8; border-radius:6px; font-weight:600; cursor:pointer; }
+    .ajout-tiers { display:none; margin-top:9px; padding:11px; background:#f8f9fa; border-radius:7px; border:1px solid #dadce0; }
+    .ajout-tiers.visible { display:block; }
+    .piece { margin-top:14px; padding:12px; border:1px solid #dadce0; border-radius:8px; background:#f8f9fa; }
+    .entree-fichier { position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; }
+    .bouton-piece { display:block; width:100%; padding:11px; border:1px solid #1a73e8; border-radius:7px; color:#1a73e8; background:#fff; text-align:center; font-weight:600; cursor:pointer; margin-top:8px; }
+    .selection { color:#5f6368; font-size:11px; margin-top:7px; overflow-wrap:anywhere; }
+    button.principal { width:100%; min-height:46px; margin-top:20px; border:none; border-radius:6px; background:#1a73e8; color:#fff; font-size:15px; font-weight:600; cursor:pointer; }
+    button:disabled { opacity:.55; cursor:wait; }
+    .message { display:none; padding:11px; border-radius:6px; margin-bottom:14px; font-size:13px; line-height:1.4; white-space:pre-wrap; }
+    .succes { display:block; color:#137333; background:#e6f4ea; }
+    .erreur { display:block; color:#b3261e; background:#fce8e6; }
+    .chargement { color:#5f6368; font-size:13px; }
   </style>
 </head>
-
 <body>
   <h2>Nouvelle transaction</h2>
 
   <div class="introduction">
-    La transaction et son écriture comptable seront créées ensemble.
+    Le compte comptable est le classement principal. Vous pouvez joindre
+    immédiatement une photo/PDF du reçu ou simplement coller son lien Drive.
   </div>
 
   <div id="message" class="message"></div>
@@ -125,70 +47,85 @@
     <select id="type" name="type" required>
       <option value="Dépense">Dépense</option>
       <option value="Revenu">Revenu</option>
-      <option value="Transfert">Transfert entre comptes</option>
     </select>
 
-    <label for="contact">Client ou fournisseur</label>
-    <input
-      id="contact"
-      name="contact"
-      type="text"
-      placeholder="Nom de l’entreprise ou de la personne"
-    >
+    <label for="tiersNom">Client / fournisseur</label>
+    <div class="ligne-tiers">
+      <input id="tiersNom" type="text" list="listeTiers" autocomplete="off"
+        placeholder="Commencez à écrire un nom">
+      <button id="ouvrirAjoutTiers" class="petit-bouton" type="button">Ajouter</button>
+    </div>
+    <datalist id="listeTiers"></datalist>
+    <input id="idTiers" name="idTiers" type="hidden">
+    <div class="aide">
+      Sélectionnez un nom existant pour conserver toujours la même écriture dans les rapports.
+    </div>
+
+    <div id="ajoutTiers" class="ajout-tiers">
+      <label for="typeNouveauTiers">Type du nouveau tiers</label>
+      <select id="typeNouveauTiers">
+        <option value="Fournisseur">Fournisseur</option>
+        <option value="Client">Client</option>
+        <option value="Autre">Autre</option>
+      </select>
+      <button id="confirmerAjoutTiers" class="petit-bouton" type="button"
+        style="margin-top:9px;width:100%;">Ajouter ce nom à DATA</button>
+    </div>
 
     <label for="description">Description *</label>
-    <textarea
-      id="description"
-      name="description"
-      required
-      placeholder="Expliquez brièvement l’opération"
-    ></textarea>
+    <textarea id="description" name="description" required
+      placeholder="Expliquez brièvement l’opération"></textarea>
 
     <label for="montant">Montant *</label>
-    <input
-      id="montant"
-      name="montant"
-      type="number"
-      min="0.01"
-      step="0.01"
-      inputmode="decimal"
-      required
-      placeholder="0,00"
-    >
+    <input id="montant" name="montant" type="number" min="0.01" step="0.01"
+      inputmode="decimal" required placeholder="0,00">
 
     <label for="compte">Compte comptable *</label>
     <select id="compte" name="compte" required></select>
     <div id="aideCompte" class="aide"></div>
 
-    <label for="programme">Programme ou activité *</label>
-    <select id="programme" name="programme" required></select>
-
-    <label for="projet">Projet précis</label>
-    <select id="projet" name="projet">
-      <option value="">Aucun projet précis</option>
+    <label for="programme">Programme / activité (optionnel)</label>
+    <select id="programme" name="programme">
+      <option value="">Aucun programme</option>
     </select>
-
-    <label for="comptePaiement">Compte de paiement *</label>
-    <select
-      id="comptePaiement"
-      name="comptePaiement"
-      required
-    ></select>
-
-    <label for="document">Lien vers la pièce dans Drive</label>
-    <input
-      id="document"
-      name="document"
-      type="url"
-      placeholder="https://drive.google.com/..."
-    >
     <div class="aide">
-      Le téléversement direct des reçus sera ajouté plus tard.
+      Utilisez PJ, PJC, etc. seulement si vous voulez suivre le budget ou les résultats par activité.
     </div>
 
-    <button id="bouton" type="submit">
-      Enregistrer la transaction
-    </button>
+    <label for="modePaiement">Mode de paiement (optionnel)</label>
+    <select id="modePaiement" name="modePaiement">
+      <option value="">Non précisé</option>
+      <option value="Comptant">Comptant</option>
+      <option value="Débit">Débit</option>
+      <option value="Crédit">Crédit</option>
+      <option value="Chèque">Chèque</option>
+      <option value="Transfert">Transfert</option>
+      <option value="Autre">Autre</option>
+    </select>
+    <div class="aide">
+      Le compte comptable de trésorerie est déterminé automatiquement.
+    </div>
+
+    <div class="piece">
+      <strong>Photo / PDF / Lien Drive du reçu</strong>
+
+      <input id="photoTransaction" class="entree-fichier"
+        name="photoTransaction" type="file" accept="image/*" capture="environment">
+      <label class="bouton-piece" for="photoTransaction">📷 Prendre une photo</label>
+
+      <input id="fichierTransaction" class="entree-fichier"
+        name="fichierTransaction" type="file"
+        accept="image/jpeg,image/png,image/heic,image/heif,image/webp,application/pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,.pdf">
+      <label class="bouton-piece" for="fichierTransaction">📎 Choisir une photo ou un PDF</label>
+
+      <div id="pieceSelectionnee" class="selection">Aucun fichier sélectionné.</div>
+
+      <label for="document">Ou coller un lien Drive</label>
+      <input id="document" name="document" type="url"
+        placeholder="https://drive.google.com/...">
+    </div>
+
+    <button id="bouton" class="principal" type="submit">Enregistrer la transaction</button>
   </form>
 
   <script>
@@ -199,48 +136,134 @@
     const message = document.getElementById('message');
     const type = document.getElementById('type');
     const compte = document.getElementById('compte');
-    const comptePaiement =
-      document.getElementById('comptePaiement');
     const aideCompte = document.getElementById('aideCompte');
     const bouton = document.getElementById('bouton');
+    const tiersNom = document.getElementById('tiersNom');
+    const idTiers = document.getElementById('idTiers');
+    const listeTiers = document.getElementById('listeTiers');
+    const ajoutTiers = document.getElementById('ajoutTiers');
+    const programme = document.getElementById('programme');
+    const photoTransaction = document.getElementById('photoTransaction');
+    const fichierTransaction = document.getElementById('fichierTransaction');
+    const pieceSelectionnee = document.getElementById('pieceSelectionnee');
 
     google.script.run
       .withSuccessHandler(initialiser)
       .withFailureHandler(afficherErreur)
       .obtenirOptionsTransaction();
 
+    function normaliser(valeur) {
+      return String(valeur || '').toLowerCase().normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+    }
+
     function initialiser(options) {
       optionsSysteme = options;
-
       document.getElementById('date').value = options.date;
+      remplirListeTiers();
 
       remplirSelect(
-        document.getElementById('programme'),
-        options.programmes.map(function(nom) {
-          return { valeur: nom, texte: nom };
+        programme,
+        options.programmes.map(function(item) {
+          return { valeur:item.nom, texte:item.nom };
         }),
-        'Choisir un programme'
-      );
-
-      const projets = options.projets.map(function(projet) {
-        return {
-          valeur: projet.id,
-          texte: projet.id + ' — ' + projet.nom
-        };
-      });
-
-      remplirSelect(
-        document.getElementById('projet'),
-        projets,
-        'Aucun projet précis'
+        'Aucun programme'
       );
 
       remplirComptes();
-      remplirComptesPaiement();
 
       chargement.style.display = 'none';
       formulaire.style.display = 'block';
     }
+
+    function remplirListeTiers() {
+      listeTiers.innerHTML = '';
+
+      optionsSysteme.tiers.forEach(function(item) {
+        const option = document.createElement('option');
+        option.value = item.nom;
+        option.label = item.type;
+        listeTiers.appendChild(option);
+      });
+    }
+
+    function synchroniserTiers() {
+      const trouve = optionsSysteme.tiers.find(function(item) {
+        return normaliser(item.nom) === normaliser(tiersNom.value);
+      });
+
+      idTiers.value = trouve ? trouve.id : '';
+    }
+
+    tiersNom.addEventListener('input', synchroniserTiers);
+    tiersNom.addEventListener('change', synchroniserTiers);
+
+    document.getElementById('ouvrirAjoutTiers').addEventListener('click', function() {
+      ajoutTiers.classList.toggle('visible');
+    });
+
+    document.getElementById('confirmerAjoutTiers').addEventListener('click', function() {
+      const nom = tiersNom.value.trim();
+      const typeNouveau = document.getElementById('typeNouveauTiers').value;
+
+      if (!nom) {
+        afficherErreur({message:'Écrivez d’abord le nom à ajouter.'});
+        return;
+      }
+
+      const btn = document.getElementById('confirmerAjoutTiers');
+      btn.disabled = true;
+
+      google.script.run
+        .withSuccessHandler(function(resultat) {
+          if (!optionsSysteme.tiers.some(function(item) { return item.id === resultat.id; })) {
+            optionsSysteme.tiers.push(resultat);
+            optionsSysteme.tiers.sort(function(a,b) {
+              return a.nom.localeCompare(b.nom, 'fr');
+            });
+          }
+
+          remplirListeTiers();
+          tiersNom.value = resultat.nom;
+          idTiers.value = resultat.id;
+          ajoutTiers.classList.remove('visible');
+
+          message.className = 'message succes';
+          message.textContent = resultat.existait
+            ? 'Ce nom existait déjà : ' + resultat.nom
+            : 'Ajouté à DATA : ' + resultat.nom;
+
+          btn.disabled = false;
+        })
+        .withFailureHandler(function(erreur) {
+          btn.disabled = false;
+          afficherErreur(erreur);
+        })
+        .ajouterTiersTransaction(nom, typeNouveau);
+    });
+
+    function choisirPiece(source, autre) {
+      const fichier = source.files && source.files[0]
+        ? source.files[0]
+        : null;
+
+      if (fichier) {
+        autre.value = '';
+        pieceSelectionnee.textContent =
+          fichier.name + ' — ' +
+          (fichier.size / 1024 / 1024).toFixed(1).replace('.', ',') + ' Mo';
+      } else {
+        pieceSelectionnee.textContent = 'Aucun fichier sélectionné.';
+      }
+    }
+
+    photoTransaction.addEventListener('change', function() {
+      choisirPiece(photoTransaction, fichierTransaction);
+    });
+
+    fichierTransaction.addEventListener('change', function() {
+      choisirPiece(fichierTransaction, photoTransaction);
+    });
 
     function remplirSelect(element, options, premierChoix) {
       element.innerHTML = '';
@@ -261,98 +284,74 @@
     function remplirComptes() {
       const typeChoisi = type.value;
 
-      const comptesFiltres = optionsSysteme.comptes.filter(
-        function(item) {
-          if (typeChoisi === 'Revenu') {
-            return item.type === 'Revenu' || item.code === '2200';
-          }
-
-          if (typeChoisi === 'Dépense') {
-            return item.type === 'Dépense' ||
-                   item.type === 'Actif';
-          }
-
-          return item.type === 'Actif';
+      const comptesFiltres = optionsSysteme.comptes.filter(function(item) {
+        if (typeChoisi === 'Revenu') {
+          return item.type === 'Revenu' || item.code === '2200';
         }
-      );
+
+        return item.type === 'Dépense' || item.type === 'Actif';
+      });
 
       remplirSelect(
         compte,
         comptesFiltres.map(function(item) {
-          return {
-            valeur: item.code,
-            texte: item.code + ' — ' + item.nom
-          };
+          return {valeur:item.code, texte:item.code + ' — ' + item.nom};
         }),
         'Choisir un compte'
       );
 
-      if (typeChoisi === 'Revenu') {
-        aideCompte.textContent =
-          'Choisissez la nature du revenu.';
-      } else if (typeChoisi === 'Dépense') {
-        aideCompte.textContent =
-          'Choisissez la dépense ou l’actif acheté.';
-      } else {
-        aideCompte.textContent =
-          'Choisissez le compte qui reçoit l’argent.';
-      }
-    }
-
-    function remplirComptesPaiement() {
-      const codesPermis = ['1000', '1010', '1100'];
-
-      const comptes = optionsSysteme.comptes.filter(
-        function(item) {
-          return codesPermis.includes(item.code);
-        }
-      );
-
-      remplirSelect(
-        comptePaiement,
-        comptes.map(function(item) {
-          return {
-            valeur: item.code,
-            texte: item.code + ' — ' + item.nom
-          };
-        }),
-        'Choisir le compte utilisé'
-      );
-
-      comptePaiement.value = '1000';
+      aideCompte.textContent =
+        typeChoisi === 'Revenu'
+          ? 'Choisissez la nature du revenu.'
+          : 'Choisissez la dépense ou l’actif acheté.';
     }
 
     type.addEventListener('change', remplirComptes);
 
     formulaire.addEventListener('submit', function(evenement) {
       evenement.preventDefault();
+      synchroniserTiers();
+
+      if (tiersNom.value.trim() && !idTiers.value) {
+        afficherErreur({
+          message:'Le client / fournisseur n’est pas dans DATA. Cliquez sur « Ajouter » pour l’enregistrer avant de continuer.'
+        });
+        return;
+      }
 
       bouton.disabled = true;
       bouton.textContent = 'Enregistrement…';
       effacerMessage();
 
-      const donnees = Object.fromEntries(
-        new FormData(formulaire).entries()
-      );
-
       google.script.run
         .withSuccessHandler(transactionEnregistree)
         .withFailureHandler(afficherErreur)
-        .enregistrerTransaction(donnees);
+        .enregistrerTransaction(formulaire);
     });
 
     function transactionEnregistree(resultat) {
+      let texte = 'Transaction enregistrée : ' + resultat.identifiant;
+
+      if (resultat.idRecu) {
+        texte += '\nReçu lié : ' + resultat.idRecu;
+
+        if (resultat.ocr && resultat.ocr.succes) {
+          texte += '\nOCR : ' + resultat.ocr.resume;
+        }
+      }
+
       message.className = 'message succes';
-      message.textContent =
-        'Transaction enregistrée : ' + resultat.identifiant;
+      message.textContent = texte;
 
       formulaire.reset();
-      document.getElementById('date').value =
-        optionsSysteme.date;
+      document.getElementById('date').value = optionsSysteme.date;
+      tiersNom.value = '';
+      idTiers.value = '';
+      ajoutTiers.classList.remove('visible');
+      pieceSelectionnee.textContent = 'Aucun fichier sélectionné.';
 
       type.value = 'Dépense';
       remplirComptes();
-      remplirComptesPaiement();
 
       bouton.disabled = false;
       bouton.textContent = 'Enregistrer la transaction';
@@ -377,3 +376,4 @@
   </script>
 </body>
 </html>
+

@@ -1,1184 +1,714 @@
-const CONFIG_REGLES_BANCAIRES_ = {
-  nomFeuille: 'Règles bancaires',
-  ligneEntetes: 5,
-  premiereLigne: 6,
-  COL_ID: 1,
-  COL_ACTIF: 2,
-  COL_PRIORITE: 3,
-  COL_SENS: 4,
-  COL_CORRESPONDANCE: 5,
-  COL_TEXTE: 6,
-  COL_TYPE: 7,
-  COL_COMPOSANTE: 8,
-  COL_FOURNISSEUR: 9,
-  COL_CONTACT: 10,
-  COL_COMPTE: 11,
-  COL_PROGRAMME: 12,
-  COL_PROJET: 13,
-  COL_NOTES: 14,
-  NOMBRE_COLONNES: 14
-};
-
-const TYPES_CLASSEMENT_REGLES_ = [
-  'Dépense',
-  'Revenu comptable direct',
-  'Entrées, forfaits ou marchandises'
-];
-
-// ─── Installer public ──────────────────────────────────────────────────────────
-
-function installerReglesBancairesConfigurables() {
-  const verrou = LockService.getDocumentLock();
-  verrou.waitLock(30000);
-
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const feuille = preparerOngletReglesBancaires_(ss);
-    const nombreMigrees = migrerReglesBancairesDepuisConfig_(ss, feuille);
-    const nombreIdentifies = attribuerIdsReglesBancaires_(feuille);
-    verifierIntegriteIdsRegles_(feuille);
-    preparerColonnesExtenduesImportBancaire_(ss);
-
-    SpreadsheetApp.getUi().alert(
-      'Module de règles bancaires installé.\n\n' +
-      'Règles migrées depuis Configuration!T:Z : ' + nombreMigrees + '\n' +
-      'Identifiants attribués : ' + nombreIdentifies
+function chargerReglesBancairesActivesV2_(
+  ss
+) {
+  const feuille =
+    ss.getSheetByName(
+      'Règles bancaires'
     );
-  } finally {
-    verrou.releaseLock();
+
+  if (!feuille) {
+    return [];
   }
+
+  const derniereLigne =
+    feuille.getLastRow();
+
+  if (derniereLigne < 6) {
+    return [];
+  }
+
+  return feuille
+    .getRange(
+      6,
+      1,
+      derniereLigne - 5,
+      14
+    )
+    .getDisplayValues()
+    .map(function(ligne, index) {
+      return {
+        ordre: index,
+        idRegle:
+          String(
+            ligne[0] || ''
+          ).trim(),
+        actif:
+          String(
+            ligne[1] || ''
+          ).trim(),
+        priorite:
+          Number(
+            ligne[2] || 0
+          ),
+        sens:
+          String(
+            ligne[3] || ''
+          ).trim(),
+        correspondance:
+          String(
+            ligne[4] || ''
+          ).trim(),
+        texte:
+          String(
+            ligne[5] || ''
+          ).trim(),
+        typeClassement:
+          String(
+            ligne[6] || ''
+          ).trim(),
+        composante:
+          String(
+            ligne[7] || ''
+          ).trim(),
+        idFournisseur:
+          String(
+            ligne[8] || ''
+          ).trim(),
+        idContact:
+          String(
+            ligne[9] || ''
+          ).trim(),
+        codeCompte:
+          String(
+            ligne[10] || ''
+          ).trim(),
+        programme:
+          String(
+            ligne[11] || ''
+          ).trim(),
+        projet:
+          String(
+            ligne[12] || ''
+          ).trim(),
+        notes:
+          String(
+            ligne[13] || ''
+          ).trim()
+      };
+    })
+    .filter(function(regle) {
+      return (
+        regle.idRegle &&
+        regle.actif === 'Oui' &&
+        regle.texte
+      );
+    })
+    .sort(function(a, b) {
+      return (
+        b.priorite -
+          a.priorite ||
+        a.ordre -
+          b.ordre
+      );
+    });
 }
 
-// ─── Commandes publiques ───────────────────────────────────────────────────────
+function normaliserRegleBancaireV2_(
+  valeur
+) {
+  return String(
+    valeur || ''
+  )
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(
+      /[\u0300-\u036f]/g,
+      ''
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-function validerReglesBancairesConfigurables() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+function rechercherRegleBancaireV2_(
+  regles,
+  description,
+  montant
+) {
+  const sens =
+    Number(montant) >= 0
+      ? 'Entrée'
+      : 'Sortie';
 
-  try {
-    const regles = chargerReglesBancairesActives_(ss);
-    SpreadsheetApp.getUi().alert(
-      'Validation réussie\n\n' +
-      regles.length + ' règle(s) active(s) valide(s) chargée(s).'
+  const texteDescription =
+    normaliserRegleBancaireV2_(
+      description
     );
-  } catch (e) {
-    SpreadsheetApp.getUi().alert(
-      'Erreur de validation des règles bancaires\n\n' + e.message
-    );
+
+  for (
+    let index = 0;
+    index < regles.length;
+    index++
+  ) {
+    const regle =
+      regles[index];
+
+    if (
+      regle.sens &&
+      regle.sens !== sens
+    ) {
+      continue;
+    }
+
+    const texteRegle =
+      normaliserRegleBancaireV2_(
+        regle.texte
+      );
+
+    const correspond =
+      regle.correspondance ===
+        'Exacte'
+        ? texteDescription ===
+          texteRegle
+        : texteDescription
+            .indexOf(
+              texteRegle
+            ) !== -1;
+
+    if (correspond) {
+      return regle;
+    }
   }
+
+  return null;
+}
+
+function appliquerReglesBancairesV2Import_(
+  feuille,
+  ligneDepart,
+  nombreLignes,
+  ss
+) {
+  if (!nombreLignes) {
+    return {
+      avertissement: null
+    };
+  }
+
+  const regles =
+    chargerReglesBancairesActivesV2_(
+      ss
+    );
+
+  if (!regles.length) {
+    return {
+      avertissement: null
+    };
+  }
+
+  const donnees = feuille
+    .getRange(
+      ligneDepart,
+      1,
+      nombreLignes,
+      36
+    )
+    .getValues();
+
+  const comptes =
+    dictionnaireV2_(
+      ss,
+      'Comptes',
+      1,
+      2
+    );
+
+  const fournisseurs =
+    dictionnaireV2_(
+      ss,
+      'Fournisseurs',
+      1,
+      2
+    );
+
+  const contacts =
+    dictionnaireV2_(
+      ss,
+      'Contacts',
+      1,
+      4
+    );
+
+  const sortieHI = [];
+  const sortiePW = [];
+
+  donnees.forEach(
+    function(ligne) {
+      const idImport =
+        String(
+          ligne[0] || ''
+        ).trim();
+
+      const description =
+        String(
+          ligne[2] || ''
+        ).trim();
+
+      const montant =
+        Number(
+          ligne[3] || 0
+        );
+
+      const traitement =
+        String(
+          ligne[30] || ''
+        ).trim();
+
+      if (
+        !idImport ||
+        traitement
+      ) {
+        sortieHI.push([
+          ligne[7] || '',
+          ligne[8] || ''
+        ]);
+
+        sortiePW.push([
+          ligne[15] || '',
+          ligne[16] || '',
+          ligne[17] || '',
+          ligne[18] || '',
+          ligne[19] || '',
+          ligne[20] || '',
+          ligne[21] || '',
+          ligne[22] || ''
+        ]);
+
+        return;
+      }
+
+      const regle =
+        rechercherRegleBancaireV2_(
+          regles,
+          description,
+          montant
+        );
+
+      if (!regle) {
+        sortieHI.push([
+          '',
+          ''
+        ]);
+
+        sortiePW.push([
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          ''
+        ]);
+
+        return;
+      }
+
+      sortieHI.push([
+        regle.codeCompte
+          ? (
+              comptes[
+                regle.codeCompte
+              ] || ''
+            )
+          : '',
+        regle.programme || ''
+      ]);
+
+      sortiePW.push([
+        regle.idFournisseur || '',
+        regle.idFournisseur
+          ? (
+              fournisseurs[
+                regle.idFournisseur
+              ] || ''
+            )
+          : '',
+        regle.idContact || '',
+        regle.idContact
+          ? (
+              contacts[
+                regle.idContact
+              ] || ''
+            )
+          : '',
+        regle.typeClassement || '',
+        regle.composante || '',
+        regle.projet || '',
+        regle.idRegle || ''
+      ]);
+    }
+  );
+
+  feuille
+    .getRange(
+      ligneDepart,
+      8,
+      nombreLignes,
+      2
+    )
+    .setNumberFormat('@')
+    .setValues(sortieHI);
+
+  feuille
+    .getRange(
+      ligneDepart,
+      16,
+      nombreLignes,
+      8
+    )
+    .setNumberFormat('@')
+    .setValues(sortiePW);
+
+  return {
+    avertissement: null
+  };
+}
+
+function dictionnaireV2_(
+  ss,
+  nomFeuille,
+  colonneCle,
+  colonneValeur
+) {
+  const feuille =
+    ss.getSheetByName(
+      nomFeuille
+    );
+
+  const resultat = {};
+
+  if (
+    !feuille ||
+    feuille.getLastRow() < 6
+  ) {
+    return resultat;
+  }
+
+  const largeur =
+    Math.max(
+      colonneCle,
+      colonneValeur
+    );
+
+  feuille
+    .getRange(
+      6,
+      1,
+      feuille.getLastRow() - 5,
+      largeur
+    )
+    .getDisplayValues()
+    .forEach(function(ligne) {
+      const cle =
+        String(
+          ligne[
+            colonneCle - 1
+          ] || ''
+        ).trim();
+
+      const valeur =
+        String(
+          ligne[
+            colonneValeur - 1
+          ] || ''
+        ).trim();
+
+      if (cle) {
+        resultat[cle] = valeur;
+      }
+    });
+
+  return resultat;
 }
 
 function reappliquerReglesBancairesAuxTransactionsAClasser() {
-  const ui = SpreadsheetApp.getUi();
+  const ss =
+    SpreadsheetApp
+      .getActiveSpreadsheet();
 
-  const reponse = ui.alert(
-    'Réappliquer les règles bancaires',
-    'Cette opération va vider et recalculer les suggestions (colonnes H, I et P:W) ' +
-    'pour toutes les transactions « À classer » dans Import bancaire.\n\n' +
-    'Les transactions « Classée » et leurs données comptables ne seront pas modifiées.\n\n' +
-    'Confirmer ?',
-    ui.ButtonSet.YES_NO
-  );
-
-  if (reponse !== ui.Button.YES) {
-    return;
-  }
-
-  const verrou = LockService.getDocumentLock();
-  verrou.waitLock(30000);
-
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const feuille = ss.getSheetByName('Import bancaire');
-
-    if (!feuille || feuille.getLastRow() < 6) {
-      ui.alert('Import bancaire est introuvable ou ne contient aucune transaction.');
-      return;
-    }
-
-    preparerColonnesExtenduesImportBancaire_(ss);
-
-    let regles;
-    try {
-      regles = chargerReglesBancairesActives_(ss);
-    } catch (e) {
-      ui.alert('Impossible de charger les règles bancaires.\n\n' + e.message);
-      return;
-    }
-
-    const dictos = chargerDictionnairesNoms_(ss);
-    const premiereTransaction = 6;
-    const derniereLigne = feuille.getLastRow();
-    const nbTotal = derniereLigne - premiereTransaction + 1;
-
-    if (nbTotal <= 0) {
-      ui.alert('Aucune transaction dans Import bancaire.');
-      return;
-    }
-
-    // Lire A:W (23 colonnes) pour avoir toutes les données nécessaires
-    const donnees = feuille
-      .getRange(premiereTransaction, 1, nbTotal, 23)
-      .getValues();
-
-    let lignesAnalysees = 0;
-    let reglesTrouvees = 0;
-    let sansCorrespondance = 0;
-    let suggestionsModifiees = 0;
-    const conflits = [];
-
-    for (let i = 0; i < nbTotal; i++) {
-      const statut = String(donnees[i][10] || '').trim();  // col K (index 10)
-      if (statut !== 'À classer') continue;
-
-      lignesAnalysees += 1;
-
-      const description = String(donnees[i][2] || '').trim();  // col C (index 2)
-      const montant = Number(donnees[i][3]) || 0;               // col D (index 3)
-
-      // Comptabiliser les suggestions précédentes (H, P, ou W non vides)
-      const hActuel = String(donnees[i][7] || '').trim();   // col H (index 7)
-      const pActuel = String(donnees[i][15] || '').trim();  // col P (index 15)
-      const wActuel = String(donnees[i][22] || '').trim();  // col W (index 22)
-      if (hActuel || pActuel || wActuel) {
-        suggestionsModifiees += 1;
-      }
-
-      let suggestion = null;
-      let estConflit = false;
-
-      try {
-        suggestion = rechercherRegleBancaireDansListe_(regles, description, montant);
-      } catch (e) {
-        estConflit = true;
-        conflits.push({
-          ligne: premiereTransaction + i,
-          description: description,
-          message: e.message
-        });
-      }
-
-      if (suggestion) {
-        reglesTrouvees += 1;
-      } else if (!estConflit) {
-        sansCorrespondance += 1;
-      }
-
-      const ligneSheet = premiereTransaction + i;
-
-      if (suggestion) {
-        const nomFournisseur = suggestion.idFournisseur
-          ? (dictos.fournisseurs[suggestion.idFournisseur] || '')
-          : '';
-        const nomContact = suggestion.idContact
-          ? (dictos.contacts[suggestion.idContact] || '')
-          : '';
-
-        // Résoudre le NOM du compte (H attend le nom, pas le code)
-        let nomCompte = '';
-        if (suggestion.codeCompte) {
-          const nomTrouve = dictos.comptes[suggestion.codeCompte];
-          if (nomTrouve === undefined) {
-            // Code inconnu → conflit explicite, ne pas écrire de valeur invalide
-            estConflit = true;
-            conflits.push({
-              ligne: ligneSheet,
-              description: description,
-              message: 'Code comptable « ' + suggestion.codeCompte +
-                       ' » introuvable dans Configuration — suggestion H ignorée'
-            });
-            feuille.getRange(ligneSheet, 8, 1, 2).clearContent();
-            feuille.getRange(ligneSheet, 16, 1, 8).clearContent();
-            continue;
-          }
-          nomCompte = nomTrouve;
-        }
-
-        // H:I — setNumberFormat('@') avant setValues ; H reçoit le NOM du compte
-        feuille.getRange(ligneSheet, 8, 1, 2)
-          .setNumberFormat('@')
-          .setValues([[nomCompte, suggestion.programme || '']]);
-
-        // P:W — setNumberFormat('@') avant setValues
-        feuille.getRange(ligneSheet, 16, 1, 8)
-          .setNumberFormat('@')
-          .setValues([[
-            suggestion.idFournisseur  || '',
-            nomFournisseur,
-            suggestion.idContact      || '',
-            nomContact,
-            suggestion.typeClassement || '',
-            suggestion.composante     || '',
-            suggestion.projet         || '',
-            suggestion.idRegle        || ''
-          ]]);
-      } else {
-        // Vider les suggestions (conflit ou aucune correspondance)
-        feuille.getRange(ligneSheet, 8, 1, 2).clearContent();
-        feuille.getRange(ligneSheet, 16, 1, 8).clearContent();
-      }
-    }
-
-    SpreadsheetApp.flush();
-
-    const conflitsMsg = conflits.length > 0
-      ? '\n\nConflits de règles (' + conflits.length + ') :\n' +
-        conflits.map(function(c) {
-          return '• Ligne ' + c.ligne + ' – ' +
-            c.description.slice(0, 40) + '\n  ' + c.message;
-        }).join('\n')
-      : '';
-
-    ui.alert(
-      'Réapplication terminée\n\n' +
-      'Lignes À classer analysées         : ' + lignesAnalysees + '\n' +
-      'Règles correspondantes             : ' + reglesTrouvees + '\n' +
-      'Sans correspondance                : ' + sansCorrespondance + '\n' +
-      'Conflits de règles                 : ' + conflits.length + '\n' +
-      'Suggestions effacées / remplacées  : ' + suggestionsModifiees +
-      conflitsMsg
+  const feuille =
+    ss.getSheetByName(
+      'Import bancaire'
     );
-  } finally {
-    verrou.releaseLock();
-  }
-}
-
-// ─── Loader public ─────────────────────────────────────────────────────────────
-
-function chargerReglesBancairesActives_(ss) {
-  const feuille = ss.getSheetByName(CONFIG_REGLES_BANCAIRES_.nomFeuille);
-  const C = CONFIG_REGLES_BANCAIRES_;
-
-  if (!feuille || feuille.getLastRow() < C.premiereLigne) {
-    return [];
-  }
-
-  const nbLignes = feuille.getLastRow() - C.ligneEntetes;
-
-  if (nbLignes <= 0) {
-    return [];
-  }
-
-  const valeurs = feuille
-    .getRange(C.premiereLigne, 1, nbLignes, C.NOMBRE_COLONNES)
-    .getDisplayValues();
-
-  const refs = chargerReferencesValidationRegles_(ss);
-  const idsVus = new Set();
-  const regles = [];
-  const erreurs = [];
-
-  valeurs.forEach(function(ligne, index) {
-    const numLigne = C.premiereLigne + index;
-    const actif = String(ligne[C.COL_ACTIF - 1] || '').trim();
-    const texte = String(ligne[C.COL_TEXTE - 1] || '').trim();
-
-    if (actif !== 'Oui' || !texte) {
-      return;
-    }
-
-    const id = String(ligne[C.COL_ID - 1] || '').trim();
-    const prioriteRaw = String(ligne[C.COL_PRIORITE - 1] || '').trim();
-    const prioriteNum = Number(prioriteRaw);
-    const prioriteValide = prioriteRaw !== '' && Number.isInteger(prioriteNum) && prioriteNum > 0;
-    const sens = String(ligne[C.COL_SENS - 1] || '').trim();
-    const correspondance = String(ligne[C.COL_CORRESPONDANCE - 1] || '').trim();
-    const typeClassement = String(ligne[C.COL_TYPE - 1] || '').trim();
-    const composante = String(ligne[C.COL_COMPOSANTE - 1] || '').trim();
-    const idFournisseur = String(ligne[C.COL_FOURNISSEUR - 1] || '').trim();
-    const idContact = String(ligne[C.COL_CONTACT - 1] || '').trim();
-    const codeCompte = String(ligne[C.COL_COMPTE - 1] || '').trim();
-    const programme = String(ligne[C.COL_PROGRAMME - 1] || '').trim();
-    const projet = String(ligne[C.COL_PROJET - 1] || '').trim();
-
-    let regleValide = true;
-
-    function ajouterErreur(cause) {
-      const msg = 'Ligne ' + numLigne +
-        (id ? ' [' + id + ']' : '') +
-        ' : ' + cause;
-      erreurs.push(msg);
-      Logger.log('Règles bancaires — ' + msg);
-      regleValide = false;
-    }
-
-    if (!id) {
-      ajouterErreur('ID manquant.');
-    } else if (!/^REG-\d{4,}$/.test(id)) {
-      ajouterErreur('ID « ' + id + ' » non conforme (format REG-0001 attendu).');
-    }
-
-    if (id && idsVus.has(id)) {
-      ajouterErreur('ID « ' + id + ' » en doublon.');
-    } else if (id) {
-      idsVus.add(id);
-    }
-
-    if (!prioriteValide) {
-      ajouterErreur('Priorité « ' + prioriteRaw + ' » invalide (entier positif attendu).');
-    }
-
-    if (sens !== 'Entrée' && sens !== 'Sortie') {
-      ajouterErreur('Sens « ' + sens + ' » invalide (Entrée ou Sortie attendu).');
-    }
-
-    if (correspondance !== 'Contient' && correspondance !== 'Exacte') {
-      ajouterErreur('Correspondance « ' + correspondance + ' » invalide (Contient ou Exacte attendu).');
-    }
-
-    if (typeClassement && TYPES_CLASSEMENT_REGLES_.indexOf(typeClassement) === -1) {
-      ajouterErreur(
-        'Type de classement « ' + typeClassement + ' » invalide (' +
-        TYPES_CLASSEMENT_REGLES_.join(', ') + ' attendu).'
-      );
-    }
-
-    if (idFournisseur) {
-      if (refs.fournisseurs === null) {
-        ajouterErreur(
-          'Fournisseur « ' + idFournisseur + ' » renseigné mais la feuille Fournisseurs est absente.'
-        );
-      } else if (!refs.fournisseurs.has(idFournisseur)) {
-        ajouterErreur('Fournisseur « ' + idFournisseur + ' » introuvable.');
-      }
-    }
-
-    if (idContact) {
-      if (refs.contacts === null) {
-        ajouterErreur(
-          'Contact « ' + idContact + ' » renseigné mais la feuille Contacts est absente.'
-        );
-      } else if (!refs.contacts.has(idContact)) {
-        ajouterErreur('Contact « ' + idContact + ' » introuvable.');
-      }
-    }
-
-    if (codeCompte) {
-      if (refs.comptes === null) {
-        ajouterErreur(
-          'Compte « ' + codeCompte + ' » renseigné mais la feuille Configuration est absente.'
-        );
-      } else if (!refs.comptes.has(codeCompte)) {
-        ajouterErreur('Compte « ' + codeCompte + ' » introuvable ou inactif.');
-      }
-    }
-
-    if (programme) {
-      if (refs.programmes === null) {
-        ajouterErreur(
-          'Programme « ' + programme + ' » renseigné mais Configuration!I6:I14 est absent.'
-        );
-      } else if (!refs.programmes.has(programme)) {
-        ajouterErreur('Programme « ' + programme + ' » introuvable.');
-      }
-    }
-
-    if (projet) {
-      if (refs.projets === null) {
-        ajouterErreur(
-          'Projet « ' + projet + ' » renseigné mais la feuille Projets est absente.'
-        );
-      } else if (refs.projetsExemple.has(projet)) {
-        ajouterErreur('Projet « ' + projet + ' » est un exemple.');
-      } else if (!refs.projets.has(projet)) {
-        ajouterErreur('Projet « ' + projet + ' » introuvable.');
-      }
-    }
-
-    if (composante && !refs.composantes.has(composante)) {
-      if (refs.composantesInactives && refs.composantesInactives.has(composante)) {
-        ajouterErreur('Composante « ' + composante + ' » est désactivée — réactivez-la ou modifiez la règle.');
-      } else {
-        ajouterErreur('Composante « ' + composante + ' » inconnue.');
-      }
-    }
-
-    if (regleValide) {
-      regles.push({
-        idRegle: id,
-        priorite: prioriteValide ? prioriteNum : 9999,
-        sens: sens,
-        correspondance: correspondance,
-        texte: texte,
-        typeClassement: typeClassement,
-        composante: composante,
-        idFournisseur: idFournisseur,
-        idContact: idContact,
-        codeCompte: codeCompte,
-        programme: programme,
-        projet: projet,
-        numeroLigne: index
-      });
-    }
-  });
-
-  if (erreurs.length > 0) {
-    throw new Error(
-      'Règles bancaires invalides (' + erreurs.length + ') :\n' +
-      erreurs.join('\n')
-    );
-  }
-
-  return regles.sort(function(a, b) {
-    if (a.priorite !== b.priorite) {
-      return a.priorite - b.priorite;
-    }
-    return a.numeroLigne - b.numeroLigne;
-  });
-}
-
-function chargerReferencesValidationRegles_(ss) {
-  var fournisseurs = null;
-  var contacts = null;
-  var comptes = null;
-  var programmes = null;
-  var projets = null;
-  var projetsExemple = null;
-
-  var feuilleFournisseurs = ss.getSheetByName('Fournisseurs');
-  if (feuilleFournisseurs && feuilleFournisseurs.getLastRow() >= 6) {
-    fournisseurs = new Set();
-    feuilleFournisseurs
-      .getRange(6, 1, feuilleFournisseurs.getLastRow() - 5, 1)
-      .getDisplayValues()
-      .forEach(function(l) { if (l[0]) fournisseurs.add(String(l[0]).trim()); });
-  }
-
-  var feuilleContacts = ss.getSheetByName('Contacts');
-  if (feuilleContacts && feuilleContacts.getLastRow() >= 6) {
-    contacts = new Set();
-    feuilleContacts
-      .getRange(6, 1, feuilleContacts.getLastRow() - 5, 1)
-      .getDisplayValues()
-      .forEach(function(l) { if (l[0]) contacts.add(String(l[0]).trim()); });
-  }
-
-  var feuilleConfig = ss.getSheetByName('Configuration');
-  if (feuilleConfig && feuilleConfig.getLastRow() >= 6) {
-    comptes = new Set();
-    programmes = new Set();
-    feuilleConfig
-      .getRange(6, 1, feuilleConfig.getLastRow() - 5, 5)
-      .getDisplayValues()
-      .forEach(function(l) {
-        if (l[0] && l[4] === 'Oui') {
-          comptes.add(String(l[0]).trim());
-        }
-      });
-    feuilleConfig
-      .getRange('I6:I14')
-      .getDisplayValues()
-      .forEach(function(l) { if (l[0]) programmes.add(String(l[0]).trim()); });
-  }
-
-  var feuilleProjets = ss.getSheetByName('Projets');
-  if (feuilleProjets && feuilleProjets.getLastRow() >= 6) {
-    projets = new Set();
-    projetsExemple = new Set();
-    feuilleProjets
-      .getRange(6, 1, feuilleProjets.getLastRow() - 5, 4)
-      .getDisplayValues()
-      .forEach(function(l) {
-        if (!l[0]) return;
-        var id = String(l[0]).trim();
-        if (String(l[3] || '').trim() === 'Exemple') {
-          projetsExemple.add(id);
-        } else {
-          projets.add(id);
-        }
-      });
-  }
-
-  // Chargement unique : actives et inactives depuis une seule lecture de AA:AL.
-  var defsToutes = chargerDefinitionsComposantes_(ss, { inclureInactives: true });
-  if (!defsToutes.length) {
-    throw new Error(
-      'Aucune composante configurée. ' +
-      'Exécutez « Installer / mettre à jour les composantes » avant les règles bancaires.'
-    );
-  }
-  var composantes = new Set(
-    defsToutes.filter(function(d) { return d.actif; }).map(function(d) { return d.libelle; })
-  );
-  var composantesInactives = new Set(
-    defsToutes.filter(function(d) { return !d.actif; }).map(function(d) { return d.libelle; })
-  );
-
-  return {
-    fournisseurs: fournisseurs,
-    contacts: contacts,
-    comptes: comptes,
-    programmes: programmes,
-    projets: projets,
-    projetsExemple: projetsExemple,
-    composantes: composantes,
-    composantesInactives: composantesInactives
-  };
-}
-
-// ─── Moteur de recherche public ────────────────────────────────────────────────
-
-function rechercherRegleBancaireDansListe_(regles, description, montant) {
-  if (!montant) {
-    return null;
-  }
-
-  const sensRecherche = montant > 0 ? 'Entrée' : 'Sortie';
-  const descNormalisee = normaliserTexteRechercheRegle_(description);
-
-  const correspondantes = regles.filter(function(r) {
-    if (r.sens !== sensRecherche) {
-      return false;
-    }
-
-    if (!r.texte) {
-      return false;
-    }
-
-    const texteNorm = normaliserTexteRechercheRegle_(r.texte);
-
-    if (r.correspondance === 'Exacte') {
-      return descNormalisee === texteNorm;
-    }
-
-    return descNormalisee.indexOf(texteNorm) !== -1;
-  });
-
-  if (!correspondantes.length) {
-    return null;
-  }
-
-  const meilleeurePriorite = Math.min.apply(
-    null,
-    correspondantes.map(function(r) { return r.priorite; })
-  );
-
-  const gagnantes = correspondantes.filter(function(r) {
-    return r.priorite === meilleeurePriorite;
-  });
-
-  if (gagnantes.length > 1) {
-    throw new Error(
-      'Conflit de règles bancaires : plusieurs règles de même priorité (' +
-      meilleeurePriorite + ') correspondent à « ' + description + ' » : ' +
-      gagnantes.map(function(r) { return r.idRegle || '(sans ID)'; }).join(', ')
-    );
-  }
-
-  const r = gagnantes[0];
-
-  return {
-    idRegle: r.idRegle,
-    typeClassement: r.typeClassement,
-    composante: r.composante,
-    idFournisseur: r.idFournisseur,
-    idContact: r.idContact,
-    codeCompte: r.codeCompte,
-    programme: r.programme,
-    projet: r.projet
-  };
-}
-
-// ─── Préparation de l'onglet ───────────────────────────────────────────────────
-
-function preparerOngletReglesBancaires_(ss) {
-  let feuille = ss.getSheetByName(CONFIG_REGLES_BANCAIRES_.nomFeuille);
-  const C = CONFIG_REGLES_BANCAIRES_;
 
   if (!feuille) {
-    feuille = ss.insertSheet(C.nomFeuille);
-    feuille.setHiddenGridlines(true);
-  }
-
-  if (!String(feuille.getRange(1, 1).getValue() || '').trim()) {
-    feuille.getRange(1, 1, 1, C.NOMBRE_COLONNES)
-      .merge()
-      .setValue('Règles bancaires')
-      .setBackground('#e8f0fe')
-      .setFontWeight('bold');
-  }
-
-  if (!String(feuille.getRange(3, 1).getValue() || '').trim()) {
-    feuille.getRange(3, 1, 1, C.NOMBRE_COLONNES)
-      .merge()
-      .setValue(
-        'Ces règles servent de suggestions uniquement et ne déclenchent aucune comptabilisation automatique.'
-      )
-      .setFontStyle('italic')
-      .setWrap(true);
-  }
-
-  const entetes = [
-    'ID règle', 'Actif', 'Priorité', 'Sens', 'Correspondance',
-    'Texte à reconnaître', 'Type de classement', 'Composante',
-    'ID fournisseur', 'ID contact', 'Code compte', 'Programme', 'Projet', 'Notes'
-  ];
-
-  verifierEtEcrireEntetesRegles_(feuille, entetes);
-
-  if (feuille.getFrozenRows() < C.ligneEntetes) {
-    feuille.setFrozenRows(C.ligneEntetes);
-  }
-
-  if (!feuille.getFilter()) {
-    feuille
-      .getRange(C.ligneEntetes, 1, feuille.getMaxRows() - C.ligneEntetes + 1, C.NOMBRE_COLONNES)
-      .createFilter();
-  }
-
-  appliquerValidationsReglesBancaires_(ss, feuille);
-
-  return feuille;
-}
-
-function verifierEtEcrireEntetesRegles_(feuille, entetes) {
-  const C = CONFIG_REGLES_BANCAIRES_;
-  const cellule = feuille.getRange(C.ligneEntetes, 1, 1, C.NOMBRE_COLONNES);
-  const valeurs = cellule.getDisplayValues()[0];
-  const premierEntete = String(valeurs[0] || '').trim();
-
-  if (!premierEntete) {
-    cellule
-      .setValues([entetes])
-      .setBackground('#f1f3f4')
-      .setFontWeight('bold')
-      .setWrap(true);
-    return;
-  }
-
-  const incompatibles = entetes.filter(function(titre, i) {
-    return String(valeurs[i] || '').trim() !== titre;
-  });
-
-  if (incompatibles.length > 0) {
     throw new Error(
-      "L'onglet « " + C.nomFeuille +
-      " » existe avec des en-têtes incompatibles dans les colonnes : " +
-      incompatibles.join(', ') +
-      '. Colonnes attendues : ' + entetes.join(', ')
+      'L’onglet Import bancaire est introuvable.'
     );
   }
-}
 
-function appliquerValidationsReglesBancaires_(ss, feuille) {
-  const C = CONFIG_REGLES_BANCAIRES_;
-  const plageData = feuille.getMaxRows() - C.premiereLigne + 1;
+  const derniereLigne =
+    feuille.getLastRow();
 
-  if (plageData <= 0) {
+  if (derniereLigne < 6) {
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        'Aucune transaction bancaire.'
+      );
     return;
   }
 
-  feuille.getRange(C.premiereLigne, C.COL_ID, plageData, 1)
-    .setNumberFormat('@');
+  appliquerReglesBancairesV2Import_(
+    feuille,
+    6,
+    derniereLigne - 5,
+    ss
+  );
 
-  feuille.getRange(C.premiereLigne, C.COL_ACTIF, plageData, 1)
-    .setDataValidation(
-      SpreadsheetApp.newDataValidation()
-        .requireValueInList(['Oui', 'Non'], true)
-        .setAllowInvalid(false)
-        .build()
-    );
-
-  feuille.getRange(C.premiereLigne, C.COL_PRIORITE, plageData, 1)
-    .setNumberFormat('0');
-
-  feuille.getRange(C.premiereLigne, C.COL_SENS, plageData, 1)
-    .setDataValidation(
-      SpreadsheetApp.newDataValidation()
-        .requireValueInList(['Entrée', 'Sortie'], true)
-        .setAllowInvalid(false)
-        .build()
-    );
-
-  feuille.getRange(C.premiereLigne, C.COL_CORRESPONDANCE, plageData, 1)
-    .setDataValidation(
-      SpreadsheetApp.newDataValidation()
-        .requireValueInList(['Contient', 'Exacte'], true)
-        .setAllowInvalid(false)
-        .build()
-    );
-
-  feuille.getRange(C.premiereLigne, C.COL_TYPE, plageData, 1)
-    .setDataValidation(
-      SpreadsheetApp.newDataValidation()
-        .requireValueInList(TYPES_CLASSEMENT_REGLES_, true)
-        .setAllowInvalid(false)
-        .build()
-    );
-
-  (function() {
-    var defs = chargerDefinitionsComposantes_(ss, { inclureInactives: false });
-    if (!defs.length) {
-      throw new Error(
-        'Aucune composante configurée. ' +
-        'Exécutez « Installer / mettre à jour les composantes » avant les règles bancaires.'
-      );
-    }
-    feuille.getRange(C.premiereLigne, C.COL_COMPOSANTE, plageData, 1)
-      .setDataValidation(
-        SpreadsheetApp.newDataValidation()
-          .requireValueInList(defs.map(function(d) { return d.libelle; }), true)
-          .setAllowInvalid(true)
-          .build()
-      );
-  })();
-
-  feuille.getRange(C.premiereLigne, C.COL_FOURNISSEUR, plageData, 1)
-    .setNumberFormat('@');
-
-  const feuilleFournisseurs = ss.getSheetByName('Fournisseurs');
-  if (feuilleFournisseurs && feuilleFournisseurs.getLastRow() >= 6) {
-    feuille.getRange(C.premiereLigne, C.COL_FOURNISSEUR, plageData, 1)
-      .setDataValidation(
-        SpreadsheetApp.newDataValidation()
-          .requireValueInRange(
-            feuilleFournisseurs.getRange(6, 1, feuilleFournisseurs.getLastRow() - 5, 1),
-            true
-          )
-          .setAllowInvalid(true)
-          .build()
-      );
-  }
-
-  feuille.getRange(C.premiereLigne, C.COL_CONTACT, plageData, 1)
-    .setNumberFormat('@');
-
-  const feuilleContacts = ss.getSheetByName('Contacts');
-  if (feuilleContacts && feuilleContacts.getLastRow() >= 6) {
-    feuille.getRange(C.premiereLigne, C.COL_CONTACT, plageData, 1)
-      .setDataValidation(
-        SpreadsheetApp.newDataValidation()
-          .requireValueInRange(
-            feuilleContacts.getRange(6, 1, feuilleContacts.getLastRow() - 5, 1),
-            true
-          )
-          .setAllowInvalid(true)
-          .build()
-      );
-  }
-
-  feuille.getRange(C.premiereLigne, C.COL_COMPTE, plageData, 1)
-    .setNumberFormat('@');
-
-  const feuilleConfig = ss.getSheetByName('Configuration');
-  if (feuilleConfig && feuilleConfig.getLastRow() >= 6) {
-    const codesComptes = feuilleConfig
-      .getRange(6, 1, feuilleConfig.getLastRow() - 5, 5)
-      .getDisplayValues()
-      .filter(function(l) { return l[0] && l[4] === 'Oui'; })
-      .map(function(l) { return String(l[0]).trim(); });
-
-    if (codesComptes.length > 0) {
-      feuille.getRange(C.premiereLigne, C.COL_COMPTE, plageData, 1)
-        .setDataValidation(
-          SpreadsheetApp.newDataValidation()
-            .requireValueInList(codesComptes, true)
-            .setAllowInvalid(true)
-            .build()
-        );
-    }
-
-    const programmes = feuilleConfig
-      .getRange('I6:I14')
-      .getDisplayValues()
-      .flat()
-      .filter(String);
-
-    if (programmes.length > 0) {
-      feuille.getRange(C.premiereLigne, C.COL_PROGRAMME, plageData, 1)
-        .setDataValidation(
-          SpreadsheetApp.newDataValidation()
-            .requireValueInList(programmes, true)
-            .setAllowInvalid(true)
-            .build()
-        );
-    }
-  }
-
-  const feuilleProjets = ss.getSheetByName('Projets');
-  if (feuilleProjets && feuilleProjets.getLastRow() >= 6) {
-    const idsProjets = feuilleProjets
-      .getRange(6, 1, feuilleProjets.getLastRow() - 5, 4)
-      .getDisplayValues()
-      .filter(function(l) { return l[0] && l[3] !== 'Exemple'; })
-      .map(function(l) { return String(l[0]).trim(); });
-
-    if (idsProjets.length > 0) {
-      feuille.getRange(C.premiereLigne, C.COL_PROJET, plageData, 1)
-        .setDataValidation(
-          SpreadsheetApp.newDataValidation()
-            .requireValueInList(idsProjets, true)
-            .setAllowInvalid(true)
-            .build()
-        );
-    }
-  }
+  SpreadsheetApp.getUi().alert(
+    'Les règles ont été réappliquées aux transactions non traitées.'
+  );
 }
 
-function migrerReglesBancairesDepuisConfig_(ss, feuille) {
-  const config = ss.getSheetByName('Configuration');
-  const C = CONFIG_REGLES_BANCAIRES_;
+function validerReglesBancairesConfigurables() {
+  const ss =
+    SpreadsheetApp
+      .getActiveSpreadsheet();
 
-  if (!config || config.getLastRow() < 6) {
-    return 0;
+  const feuille =
+    ss.getSheetByName(
+      'Règles bancaires'
+    );
+
+  if (!feuille) {
+    throw new Error(
+      'L’onglet Règles bancaires est introuvable.'
+    );
   }
 
-  const reglesSources = config
-    .getRange(6, 20, config.getLastRow() - 5, 7)
-    .getValues();
+  const comptes =
+    dictionnaireV2_(
+      ss,
+      'Comptes',
+      1,
+      2
+    );
 
-  const clesExistantes = new Set();
-  const derniereLigneFeuille = feuille.getLastRow();
+  const programmes =
+    dictionnaireV2_(
+      ss,
+      'Programmes',
+      2,
+      1
+    );
 
-  if (derniereLigneFeuille >= C.premiereLigne) {
+  const fournisseurs =
+    dictionnaireV2_(
+      ss,
+      'Fournisseurs',
+      1,
+      2
+    );
+
+  const projets =
+    dictionnaireV2_(
+      ss,
+      'Projets',
+      1,
+      2
+    );
+
+  const erreurs = [];
+  const ids = new Set();
+
+  if (feuille.getLastRow() >= 6) {
     feuille
-      .getRange(C.premiereLigne, 1, derniereLigneFeuille - C.ligneEntetes, C.NOMBRE_COLONNES)
+      .getRange(
+        6,
+        1,
+        feuille.getLastRow() - 5,
+        14
+      )
       .getDisplayValues()
-      .forEach(function(ligne) {
-        const sens = String(ligne[C.COL_SENS - 1] || '').trim();
-        const texte = String(ligne[C.COL_TEXTE - 1] || '').trim();
-        if (sens && texte) {
-          clesExistantes.add(sens + '|' + normaliserTexteRechercheRegle_(texte));
+      .forEach(function(
+        ligne,
+        index
+      ) {
+        const numeroLigne =
+          index + 6;
+
+        const id =
+          String(
+            ligne[0] || ''
+          ).trim();
+
+        const actif =
+          String(
+            ligne[1] || ''
+          ).trim();
+
+        if (!id && actif !== 'Oui') {
+          return;
+        }
+
+        if (!id) {
+          erreurs.push(
+            'Ligne ' +
+            numeroLigne +
+            ' : ID règle manquant.'
+          );
+          return;
+        }
+
+        if (ids.has(id)) {
+          erreurs.push(
+            'Ligne ' +
+            numeroLigne +
+            ' : ID règle en double (' +
+            id +
+            ').'
+          );
+        }
+
+        ids.add(id);
+
+        const sens =
+          String(
+            ligne[3] || ''
+          ).trim();
+
+        const correspondance =
+          String(
+            ligne[4] || ''
+          ).trim();
+
+        const texte =
+          String(
+            ligne[5] || ''
+          ).trim();
+
+        const fournisseur =
+          String(
+            ligne[8] || ''
+          ).trim();
+
+        const compte =
+          String(
+            ligne[10] || ''
+          ).trim();
+
+        const programme =
+          String(
+            ligne[11] || ''
+          ).trim();
+
+        const projet =
+          String(
+            ligne[12] || ''
+          ).trim();
+
+        if (
+          actif === 'Oui' &&
+          !['Entrée', 'Sortie']
+            .includes(sens)
+        ) {
+          erreurs.push(
+            'Ligne ' +
+            numeroLigne +
+            ' : sens invalide.'
+          );
+        }
+
+        if (
+          actif === 'Oui' &&
+          !['Contient', 'Exacte']
+            .includes(
+              correspondance
+            )
+        ) {
+          erreurs.push(
+            'Ligne ' +
+            numeroLigne +
+            ' : correspondance invalide.'
+          );
+        }
+
+        if (
+          actif === 'Oui' &&
+          !texte
+        ) {
+          erreurs.push(
+            'Ligne ' +
+            numeroLigne +
+            ' : texte à reconnaître manquant.'
+          );
+        }
+
+        if (
+          compte &&
+          comptes[compte] ===
+            undefined
+        ) {
+          erreurs.push(
+            'Ligne ' +
+            numeroLigne +
+            ' : compte ' +
+            compte +
+            ' introuvable.'
+          );
+        }
+
+        if (
+          programme &&
+          programmes[programme] ===
+            undefined
+        ) {
+          erreurs.push(
+            'Ligne ' +
+            numeroLigne +
+            ' : programme « ' +
+            programme +
+            ' » introuvable.'
+          );
+        }
+
+        if (
+          fournisseur &&
+          fournisseurs[
+            fournisseur
+          ] === undefined
+        ) {
+          erreurs.push(
+            'Ligne ' +
+            numeroLigne +
+            ' : fournisseur ' +
+            fournisseur +
+            ' introuvable.'
+          );
+        }
+
+        if (
+          projet &&
+          projets[projet] ===
+            undefined
+        ) {
+          erreurs.push(
+            'Ligne ' +
+            numeroLigne +
+            ' : projet ' +
+            projet +
+            ' introuvable.'
+          );
         }
       });
   }
 
-  let nombreMigrees = 0;
-  let ligneEcriture = Math.max(feuille.getLastRow() + 1, C.premiereLigne);
+  SpreadsheetApp.getUi().alert(
+    erreurs.length
+      ? (
+          'Validation terminée avec ' +
+          erreurs.length +
+          ' problème(s).\n\n' +
+          erreurs
+            .slice(0, 20)
+            .join('\n')
+        )
+      : (
+          'Validation terminée.\n\n' +
+          'Toutes les règles actives sont cohérentes avec les référentiels V2.'
+        )
+  );
 
-  reglesSources.forEach(function(ligne) {
-    const sens = String(ligne[0] || '').trim();
-    const texte = String(ligne[1] || '').trim();
-    const idFournisseur = String(ligne[2] || '').trim();
-    const idContact = String(ligne[3] || '').trim();
-    const codeCompte = String(ligne[4] || '').trim();
-    const programme = String(ligne[5] || '').trim();
-    const actif = String(ligne[6] || '').trim();
-
-    if (!sens || !texte) {
-      return;
-    }
-
-    const cle = sens + '|' + normaliserTexteRechercheRegle_(texte);
-    if (clesExistantes.has(cle)) {
-      return;
-    }
-
-    let type = 'Dépense';
-    if (sens === 'Entrée') {
-      type = ['4000', '4010', '4020'].indexOf(codeCompte) !== -1
-        ? 'Entrées, forfaits ou marchandises'
-        : 'Revenu comptable direct';
-    }
-
-    feuille.getRange(ligneEcriture, 1, 1, C.NOMBRE_COLONNES).setValues([[
-      '',
-      actif || 'Oui',
-      100,
-      sens,
-      'Contient',
-      texte,
-      type,
-      '',
-      idFournisseur,
-      idContact,
-      codeCompte,
-      programme,
-      '',
-      'Migrée depuis Configuration!T:Z'
-    ]]);
-
-    feuille.getRange(ligneEcriture, C.COL_ID).setNumberFormat('@');
-    feuille.getRange(ligneEcriture, C.COL_FOURNISSEUR).setNumberFormat('@');
-    feuille.getRange(ligneEcriture, C.COL_CONTACT).setNumberFormat('@');
-    feuille.getRange(ligneEcriture, C.COL_COMPTE).setNumberFormat('@');
-
-    clesExistantes.add(cle);
-    ligneEcriture += 1;
-    nombreMigrees += 1;
-  });
-
-  return nombreMigrees;
-}
-
-function attribuerIdsReglesBancaires_(feuille) {
-  const C = CONFIG_REGLES_BANCAIRES_;
-  const derniereLigne = feuille.getLastRow();
-
-  if (derniereLigne < C.premiereLigne) {
-    return 0;
-  }
-
-  const nbLignes = derniereLigne - C.ligneEntetes;
-
-  if (nbLignes <= 0) {
-    return 0;
-  }
-
-  const colonnesIDTexte = feuille
-    .getRange(C.premiereLigne, 1, nbLignes, C.COL_TEXTE)
-    .getDisplayValues();
-
-  // Passe 1 : déterminer le numéro maximum déjà attribué
-  let numeroMax = 0;
-  colonnesIDTexte.forEach(function(ligne) {
-    const id = String(ligne[C.COL_ID - 1] || '').trim();
-    const match = id.match(/^REG-(\d+)$/);
-    if (match) {
-      numeroMax = Math.max(numeroMax, Number(match[1]));
-    }
-  });
-
-  // Passe 2 : identifier les lignes sans ID ayant un texte à reconnaître
-  const aEcrire = [];
-  colonnesIDTexte.forEach(function(ligne, i) {
-    const id = String(ligne[C.COL_ID - 1] || '').trim();
-    const texte = String(ligne[C.COL_TEXTE - 1] || '').trim();
-    if (!id && texte) {
-      numeroMax += 1;
-      aEcrire.push({
-        ligneSheet: C.premiereLigne + i,
-        id: 'REG-' + String(numeroMax).padStart(4, '0')
-      });
-    }
-  });
-
-  if (aEcrire.length === 0) {
-    return 0;
-  }
-
-  // Écriture : setNumberFormat('@') AVANT setValue pour garantir le stockage en texte
-  aEcrire.forEach(function(item) {
-    feuille.getRange(item.ligneSheet, C.COL_ID)
-      .setNumberFormat('@')
-      .setValue(item.id);
-  });
-
-  SpreadsheetApp.flush();
-
-  // Relecture groupée pour confirmer la persistance de chaque identifiant
-  const minLigne = aEcrire[0].ligneSheet;
-  const maxLigne = aEcrire[aEcrire.length - 1].ligneSheet;
-  const relues = feuille
-    .getRange(minLigne, C.COL_ID, maxLigne - minLigne + 1, 1)
-    .getDisplayValues();
-
-  let nombreAttribues = 0;
-  const echecEcritures = [];
-
-  aEcrire.forEach(function(item) {
-    const valeur = String(relues[item.ligneSheet - minLigne][0] || '').trim();
-    if (valeur === item.id) {
-      nombreAttribues += 1;
-    } else {
-      echecEcritures.push(
-        'Ligne ' + item.ligneSheet + ' : attendu « ' + item.id + ' », lu « ' + valeur + ' ».'
-      );
-    }
-  });
-
-  if (echecEcritures.length > 0) {
-    throw new Error(
-      'Échec d\'écriture des identifiants dans la colonne A (' +
-      echecEcritures.length + ' cellule(s)) :\n' +
-      echecEcritures.join('\n')
-    );
-  }
-
-  return nombreAttribues;
-}
-
-function verifierIntegriteIdsRegles_(feuille) {
-  const C = CONFIG_REGLES_BANCAIRES_;
-  const derniereLigne = feuille.getLastRow();
-
-  if (derniereLigne < C.premiereLigne) {
-    return;
-  }
-
-  const nbLignes = derniereLigne - C.ligneEntetes;
-
-  if (nbLignes <= 0) {
-    return;
-  }
-
-  const colonnesIDTexte = feuille
-    .getRange(C.premiereLigne, 1, nbLignes, C.COL_TEXTE)
-    .getDisplayValues();
-
-  const erreurs = [];
-  const idsVus = new Set();
-
-  colonnesIDTexte.forEach(function(ligne, i) {
-    const id = String(ligne[C.COL_ID - 1] || '').trim();
-    const texte = String(ligne[C.COL_TEXTE - 1] || '').trim();
-
-    if (!texte) {
-      return;
-    }
-
-    if (!id) {
-      erreurs.push(
-        'Ligne ' + (C.premiereLigne + i) + ' : texte présent mais identifiant manquant en colonne A.'
-      );
-    } else if (idsVus.has(id)) {
-      erreurs.push(
-        'Ligne ' + (C.premiereLigne + i) + ' : identifiant « ' + id + ' » en doublon.'
-      );
-    } else {
-      idsVus.add(id);
-    }
-  });
-
-  if (erreurs.length > 0) {
-    throw new Error(
-      'Intégrité des identifiants compromise (' + erreurs.length + ' problème(s)) :\n' +
-      erreurs.join('\n')
-    );
-  }
-}
-
-// ─── Helpers d'application (partagés avec ImportCsv.js) ──────────────────────
-
-function chargerDictionnairesNoms_(ss) {
-  const fournisseurs = {};
-  const contacts = {};
-  const comptes = {};
-
-  const feuilleFournisseurs = ss.getSheetByName('Fournisseurs');
-  if (feuilleFournisseurs && feuilleFournisseurs.getLastRow() >= 6) {
-    feuilleFournisseurs
-      .getRange(6, 1, feuilleFournisseurs.getLastRow() - 5, 2)
-      .getDisplayValues()
-      .forEach(function(l) {
-        const id = String(l[0] || '').trim();
-        if (id) fournisseurs[id] = String(l[1] || '').trim();
-      });
-  }
-
-  const feuilleContacts = ss.getSheetByName('Contacts');
-  if (feuilleContacts && feuilleContacts.getLastRow() >= 6) {
-    feuilleContacts
-      .getRange(6, 1, feuilleContacts.getLastRow() - 5, 4)
-      .getDisplayValues()
-      .forEach(function(l) {
-        const id = String(l[0] || '').trim();
-        if (id) contacts[id] = String(l[3] || '').trim();
-      });
-  }
-
-  // Configuration col A = code comptable, col B = nom, col E = 'Oui' si actif
-  const feuilleConfig = ss.getSheetByName('Configuration');
-  if (feuilleConfig && feuilleConfig.getLastRow() >= 6) {
-    feuilleConfig
-      .getRange(6, 1, feuilleConfig.getLastRow() - 5, 5)
-      .getDisplayValues()
-      .forEach(function(l) {
-        const code = String(l[0] || '').trim();
-        const nom  = String(l[1] || '').trim();
-        const actif = String(l[4] || '').trim();
-        if (code && actif === 'Oui') comptes[code] = nom;
-      });
-  }
-
-  return { fournisseurs: fournisseurs, contacts: contacts, comptes: comptes };
-}
-
-function preparerColonnesExtenduesImportBancaire_(ss) {
-  const feuille = ss.getSheetByName('Import bancaire');
-  if (!feuille) return;
-
-  // ── 1. Agrandir la feuille avant tout getRange sur T:W ────────────────────
-  const colMax = feuille.getMaxColumns();
-  if (colMax < 23) {
-    feuille.insertColumnsAfter(colMax, 23 - colMax);
-  }
-
-  // ── 2. En-têtes T:W (idempotent, erreur si incompatible) ──────────────────
-  const lettreColonne = { 20: 'T', 21: 'U', 22: 'V', 23: 'W' };
-
-  const attendus = [
-    { col: 20, valeur: 'Type de classement suggéré', largeur: 190 },
-    { col: 21, valeur: 'Composante suggérée',         largeur: 170 },
-    { col: 22, valeur: 'Projet suggéré',              largeur: 130 },
-    { col: 23, valeur: 'ID règle appliquée',          largeur: 130 }
-  ];
-
-  attendus.forEach(function(entete) {
-    const cellule = feuille.getRange(5, entete.col);
-    const valeurActuelle = String(cellule.getValue() || '').trim();
-
-    if (!valeurActuelle) {
-      cellule
-        .setValue(entete.valeur)
-        .setBackground('#f1f3f4')
-        .setFontWeight('bold')
-        .setWrap(true);
-      feuille.setColumnWidth(entete.col, entete.largeur);
-    } else if (valeurActuelle !== entete.valeur) {
-      throw new Error(
-        'Import bancaire : la cellule ' +
-        lettreColonne[entete.col] + '5 contient « ' + valeurActuelle +
-        ' » au lieu de « ' + entete.valeur +
-        ' ». Corrigez manuellement avant de continuer.'
-      );
-    }
-  });
-
-  // ── 3. Formats et validations sur les données (ligne 6 et plus) ────────────
-  const derniereLigne = feuille.getMaxRows();
-  if (derniereLigne < 6) return;
-
-  const plageData = derniereLigne - 5;
-
-  // Format texte sur l'ensemble de T:W
-  feuille.getRange(6, 20, plageData, 4).setNumberFormat('@');
-
-  // T (col 20) : validation Type de classement
-  feuille.getRange(6, 20, plageData, 1)
-    .setDataValidation(
-      SpreadsheetApp.newDataValidation()
-        .requireValueInList(TYPES_CLASSEMENT_REGLES_, true)
-        .setAllowInvalid(true)
-        .build()
-    );
-
-  // U (col 21) : validation Composante
-  (function() {
-    var defs = chargerDefinitionsComposantes_(ss, { inclureInactives: false });
-    if (!defs.length) {
-      throw new Error(
-        'Aucune composante configurée. ' +
-        'Exécutez « Installer / mettre à jour les composantes » avant l\'import bancaire.'
-      );
-    }
-    feuille.getRange(6, 21, plageData, 1)
-      .setDataValidation(
-        SpreadsheetApp.newDataValidation()
-          .requireValueInList(defs.map(function(d) { return d.libelle; }), true)
-          .setAllowInvalid(true)
-          .build()
-      );
-  })();
-
-  // V (col 22) : validation Projets réels (excluant Exemple)
-  const feuilleProjets = ss.getSheetByName('Projets');
-  if (feuilleProjets && feuilleProjets.getLastRow() >= 6) {
-    const idsProjets = feuilleProjets
-      .getRange(6, 1, feuilleProjets.getLastRow() - 5, 4)
-      .getDisplayValues()
-      .filter(function(l) { return l[0] && l[3] !== 'Exemple'; })
-      .map(function(l) { return String(l[0]).trim(); });
-
-    if (idsProjets.length > 0) {
-      feuille.getRange(6, 22, plageData, 1)
-        .setDataValidation(
-          SpreadsheetApp.newDataValidation()
-            .requireValueInList(idsProjets, true)
-            .setAllowInvalid(true)
-            .build()
-        );
-    }
-  }
-
-  // W (col 23) : format texte uniquement (déjà inclus dans le setNumberFormat groupé)
+  return erreurs;
 }

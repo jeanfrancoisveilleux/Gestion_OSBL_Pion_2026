@@ -2,8 +2,9 @@
 <html>
 <head>
   <base target="_top">
-
   <style>
+    * { box-sizing: border-box; }
+
     body {
       margin: 0;
       padding: 20px;
@@ -25,16 +26,43 @@
     }
 
     .zone {
-      padding: 18px;
-      border: 2px dashed #dadce0;
+      padding: 16px;
+      border: 1px solid #dadce0;
       border-radius: 8px;
       background: #f8f9fa;
     }
 
-    input[type="file"] {
-      box-sizing: border-box;
+    .separateur {
+      margin: 14px 0;
+      text-align: center;
+      color: #5f6368;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    input[type="file"],
+    input[type="url"] {
       width: 100%;
-      font-size: 14px;
+      min-height: 42px;
+      padding: 8px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      background: white;
+      font-size: 13px;
+    }
+
+    .aide {
+      margin-top: 6px;
+      color: #5f6368;
+      font-size: 11px;
+      line-height: 1.4;
     }
 
     button {
@@ -89,7 +117,11 @@
       border: 3px solid #aecbfa;
       border-top-color: #1a73e8;
       border-radius: 50%;
-      animation: rotation 0.8s linear infinite;
+      animation: rotation .8s linear infinite;
+    }
+
+    @keyframes rotation {
+      to { transform: rotate(360deg); }
     }
 
     .progression-titre {
@@ -103,12 +135,6 @@
       font-size: 12px;
     }
 
-    @keyframes rotation {
-      to {
-        transform: rotate(360deg);
-      }
-    }
-
     .message {
       display: none;
       margin-top: 16px;
@@ -116,6 +142,7 @@
       border-radius: 8px;
       font-size: 13px;
       line-height: 1.55;
+      white-space: pre-wrap;
     }
 
     .succes {
@@ -135,47 +162,58 @@
       font-weight: 600;
     }
 
-    .avertissement-regles {
-      margin-top: 10px;
-      padding: 10px 12px;
-      border-left: 4px solid #f29900;
-      border-radius: 4px;
-      background: #fef7e0;
-      color: #5c3d00;
-      font-size: 12px;
-      line-height: 1.5;
-    }
-
-    .avertissement-regles strong {
-      display: block;
-      margin-bottom: 4px;
-      font-size: 13px;
+    .detail-source {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(0,0,0,.08);
     }
 
     .confidentiel {
       margin-top: 14px;
       color: #5f6368;
       font-size: 11px;
+      line-height: 1.45;
     }
   </style>
-</head>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
 <body>
   <h2>Importer un relevé Desjardins</h2>
 
   <div class="introduction">
-    Les transactions seront ajoutées dans l’onglet
-    <strong>Import bancaire</strong> avec le statut
-    <strong>À classer</strong>. Aucune écriture comptable
-    ne sera créée à cette étape.
+    Importez directement un ou plusieurs fichiers
+    <strong>CSV, PDF, XLS ou XLSX</strong>,
+    ou collez un lien vers un <strong>Google Sheet</strong>.
+    Les doublons seront ignorés automatiquement.
   </div>
 
   <div id="zoneImport" class="zone">
+    <label for="fichiers">Fichiers bancaires</label>
     <input
-      id="fichier"
+      id="fichiers"
       type="file"
-      accept=".csv,text/csv"
+      multiple
+      accept=".csv,.txt,.pdf,.xls,.xlsx,text/csv,text/plain,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     >
+
+    <div class="aide">
+      Les PDF Desjardins sont lus directement dans votre navigateur :
+      aucun OCR Google n’est utilisé.
+    </div>
+
+    <div class="separateur">OU</div>
+
+    <label for="lienGoogle">Lien Google Sheets / Drive</label>
+    <input
+      id="lienGoogle"
+      type="url"
+      placeholder="https://docs.google.com/spreadsheets/d/..."
+    >
+
+    <div class="aide">
+      Pour un Google Sheet natif, collez simplement son lien.
+    </div>
 
     <button id="importer" type="button">
       Analyser et importer
@@ -194,7 +232,7 @@
         Importation en cours…
       </div>
       <div id="progressionDetail" class="progression-detail">
-        Lecture et analyse du relevé bancaire.
+        Préparation du relevé bancaire.
       </div>
     </div>
   </div>
@@ -211,13 +249,14 @@
   </button>
 
   <div id="confidentiel" class="confidentiel">
-    Utilisez le format « CSV accentué » de Desjardins.
-    Les doublons déjà présents seront ignorés.
+    Les PDF texte sont analysés localement dans cette fenêtre avec PDF.js.
+    Les données bancaires extraites sont ensuite envoyées à votre Apps Script.
   </div>
 
   <script>
     const zoneImport = document.getElementById('zoneImport');
-    const fichier = document.getElementById('fichier');
+    const fichiers = document.getElementById('fichiers');
+    const lienGoogle = document.getElementById('lienGoogle');
     const importer = document.getElementById('importer');
     const fermer = document.getElementById('fermer');
     const progression = document.getElementById('progression');
@@ -229,90 +268,537 @@
     let minuterie = null;
     let debutImportation = null;
 
-    importer.addEventListener('click', function() {
-      if (!fichier.files.length) {
-        afficherErreur('Veuillez sélectionner un fichier CSV.');
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+
+    importer.addEventListener('click', async function() {
+      const selection = Array.from(fichiers.files || []);
+      const lien = lienGoogle.value.trim();
+
+      if (!selection.length && !lien) {
+        afficherErreur(
+          'Sélectionnez au moins un fichier ou collez un lien Google Sheets.'
+        );
         return;
       }
 
-      const selection = fichier.files[0];
+      if (selection.length && lien) {
+        afficherErreur(
+          'Utilisez soit les fichiers, soit le lien Google Sheets pour une même importation.'
+        );
+        return;
+      }
 
-      if (!selection.name.toLowerCase().endsWith('.csv')) {
-        afficherErreur('Le fichier sélectionné doit être un CSV.');
+      const tropGros = selection.find(function(fichier) {
+        return fichier.size > 20 * 1024 * 1024;
+      });
+
+      if (tropGros) {
+        afficherErreur(
+          'Le fichier « ' + tropGros.name + ' » dépasse 20 Mo.'
+        );
         return;
       }
 
       demarrerProgression();
 
-      const lecteur = new FileReader();
+      const resultats = [];
+      const erreurs = [];
 
-      lecteur.onload = function(evenement) {
-        progressionDetail.textContent =
-          'Envoi du fichier et ajout des transactions…';
+      try {
+        if (lien) {
+          progressionDetail.textContent =
+            'Lecture du fichier Google Drive…';
 
-        google.script.run
-          .withSuccessHandler(importationTerminee)
-          .withFailureHandler(function(erreur) {
-            afficherErreur(
-              erreur && erreur.message
-                ? erreur.message
-                : String(erreur)
+          try {
+            resultats.push(
+              await appelerServeurUniversel({
+                lienGoogle: lien
+              })
             );
-          })
-          .importerCsvDesjardins(
-            evenement.target.result,
-            selection.name
-          );
-      };
+          } catch (erreur) {
+            erreurs.push({
+              source: 'Lien Google',
+              message: texteErreur(erreur)
+            });
+          }
+        } else {
+          for (
+            let index = 0;
+            index < selection.length;
+            index++
+          ) {
+            const fichier = selection[index];
+            const extension = extensionFichier(fichier.name);
 
-      lecteur.onerror = function() {
-        afficherErreur(
-          'Impossible de lire le fichier sélectionné.'
-        );
-      };
+            progressionDetail.textContent =
+              'Fichier ' +
+              (index + 1) +
+              ' de ' +
+              selection.length +
+              ' — ' +
+              fichier.name;
 
-      lecteur.readAsText(selection, 'ISO-8859-1');
+            try {
+              if (extension === 'pdf') {
+                const transactions =
+                  await extraireTransactionsPdfDesjardins(fichier);
+
+                if (!transactions.length) {
+                  throw new Error(
+                    'Aucune transaction Desjardins n’a été reconnue dans ce PDF. ' +
+                    'Le PDF est peut-être une image numérisée sans couche texte.'
+                  );
+                }
+
+                progressionDetail.textContent =
+                  fichier.name +
+                  ' — ' +
+                  transactions.length +
+                  ' transaction(s) détectée(s), importation…';
+
+                resultats.push(
+                  await appelerServeurPdf(
+                    transactions,
+                    fichier.name
+                  )
+                );
+              } else {
+                const base64 =
+                  await lireFichierBase64(fichier);
+
+                resultats.push(
+                  await appelerServeurUniversel({
+                    nomFichier: fichier.name,
+                    mimeType: fichier.type || '',
+                    contenuBase64: base64
+                  })
+                );
+              }
+            } catch (erreur) {
+              erreurs.push({
+                source: fichier.name,
+                message: texteErreur(erreur)
+              });
+            }
+          }
+        }
+
+        afficherResultats(resultats, erreurs);
+      } catch (erreur) {
+        afficherErreur(texteErreur(erreur));
+      }
     });
 
     fermer.addEventListener('click', function() {
       google.script.host.close();
     });
 
+    function extensionFichier(nom) {
+      const morceaux = String(nom || '').toLowerCase().split('.');
+      return morceaux.length > 1
+        ? morceaux.pop()
+        : '';
+    }
+
+    function appelerServeurUniversel(entree) {
+      return new Promise(function(resolve, reject) {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .importerReleveBancaire(entree);
+      });
+    }
+
+    function appelerServeurPdf(transactions, nomFichier) {
+      return new Promise(function(resolve, reject) {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .importerTransactionsPdfClient(
+            transactions,
+            nomFichier
+          );
+      });
+    }
+
+    async function extraireTransactionsPdfDesjardins(fichier) {
+      if (typeof pdfjsLib === 'undefined') {
+        throw new Error(
+          'Le lecteur PDF.js n’a pas pu être chargé. Vérifiez votre connexion Internet.'
+        );
+      }
+
+      const buffer = await fichier.arrayBuffer();
+
+      const pdf = await pdfjsLib
+        .getDocument({
+          data: new Uint8Array(buffer)
+        })
+        .promise;
+
+      let annee = extraireAnneeNomFichier(fichier.name);
+      let soldePrecedent = null;
+      const transactions = [];
+
+      for (
+        let numeroPage = 1;
+        numeroPage <= pdf.numPages;
+        numeroPage++
+      ) {
+        const page = await pdf.getPage(numeroPage);
+        const contenu = await page.getTextContent();
+
+        const items = contenu.items
+          .filter(function(item) {
+            return String(item.str || '').trim();
+          })
+          .map(function(item) {
+            return {
+              texte: String(item.str || '').trim(),
+              x: Number(item.transform[4]) || 0,
+              y: Number(item.transform[5]) || 0
+            };
+          });
+
+        if (!annee) {
+          const textePage = items
+            .map(function(item) {
+              return item.texte;
+            })
+            .join(' ');
+
+          const matchAnnee = textePage.match(/\b(20\d{2})\b/);
+
+          if (matchAnnee) {
+            annee = Number(matchAnnee[1]);
+          }
+        }
+
+        const lignes = grouperItemsPdfParLigne(items);
+
+        lignes.forEach(function(ligne) {
+          const tries = ligne.items
+            .slice()
+            .sort(function(a, b) {
+              return a.x - b.x;
+            });
+
+          const colonneGauche = joindreItemsPdf(
+            tries.filter(function(item) {
+              return item.x < 330;
+            })
+          );
+
+          const colonneSortie = joindreItemsPdf(
+            tries.filter(function(item) {
+              return item.x >= 330 && item.x < 450;
+            })
+          );
+
+          const colonneDepot = joindreItemsPdf(
+            tries.filter(function(item) {
+              return item.x >= 450 && item.x < 520;
+            })
+          );
+
+          const colonneSolde = joindreItemsPdf(
+            tries.filter(function(item) {
+              return item.x >= 520;
+            })
+          );
+
+          if (
+            /solde\s+report/i.test(colonneGauche) &&
+            colonneSolde
+          ) {
+            const soldeReporte = convertirMontantPdf(colonneSolde);
+
+            if (soldeReporte !== null) {
+              soldePrecedent = soldeReporte;
+            }
+
+            return;
+          }
+
+          const match = colonneGauche.match(
+            /^\s*(\d{1,2})\s+([A-Za-zÀ-ÿ]{3,9})\s+([A-Z]{2,5})\s+(.+?)\s*$/
+          );
+
+          if (!match) {
+            return;
+          }
+
+          const mois = numeroMoisPdf(match[2]);
+
+          if (mois < 0) {
+            return;
+          }
+
+          const jour = Number(match[1]);
+          const code = match[3];
+          const description = match[4]
+            .replace(/\s*\/\s*/g, ' / ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          let retrait =
+            convertirMontantPdf(colonneSortie) || 0;
+
+          let depot =
+            convertirMontantPdf(colonneDepot) || 0;
+
+          const solde =
+            convertirMontantPdf(colonneSolde);
+
+          if (
+            !retrait &&
+            !depot &&
+            solde !== null &&
+            soldePrecedent !== null
+          ) {
+            const variation =
+              Math.round(
+                (solde - soldePrecedent) * 100
+              ) / 100;
+
+            if (variation < 0) {
+              retrait = Math.abs(variation);
+            } else if (variation > 0) {
+              depot = variation;
+            }
+          }
+
+          if (
+            (!retrait && !depot) ||
+            (retrait && depot)
+          ) {
+            return;
+          }
+
+          const anneeFinale =
+            annee || new Date().getFullYear();
+
+          transactions.push({
+            date:
+              anneeFinale +
+              '-' +
+              String(mois + 1).padStart(2, '0') +
+              '-' +
+              String(jour).padStart(2, '0'),
+            code: code,
+            description: description,
+            retrait: retrait,
+            depot: depot,
+            solde: solde,
+            reference:
+              'PDF-' +
+              String(transactions.length + 1)
+                .padStart(3, '0')
+          });
+
+          if (solde !== null) {
+            soldePrecedent = solde;
+          }
+        });
+      }
+
+      return transactions;
+    }
+
+    function grouperItemsPdfParLigne(items) {
+      const lignes = [];
+      const tolerance = 2.2;
+
+      items
+        .slice()
+        .sort(function(a, b) {
+          if (Math.abs(b.y - a.y) > tolerance) {
+            return b.y - a.y;
+          }
+
+          return a.x - b.x;
+        })
+        .forEach(function(item) {
+          let ligne = null;
+
+          for (let i = 0; i < lignes.length; i++) {
+            if (
+              Math.abs(lignes[i].y - item.y) <= tolerance
+            ) {
+              ligne = lignes[i];
+              break;
+            }
+          }
+
+          if (!ligne) {
+            ligne = {
+              y: item.y,
+              items: []
+            };
+            lignes.push(ligne);
+          }
+
+          ligne.items.push(item);
+
+          ligne.y =
+            ligne.items.reduce(function(total, courant) {
+              return total + courant.y;
+            }, 0) /
+            ligne.items.length;
+        });
+
+      return lignes.sort(function(a, b) {
+        return b.y - a.y;
+      });
+    }
+
+    function joindreItemsPdf(items) {
+      return items
+        .slice()
+        .sort(function(a, b) {
+          return a.x - b.x;
+        })
+        .map(function(item) {
+          return item.texte;
+        })
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function convertirMontantPdf(texte) {
+      const valeur = String(texte || '')
+        .replace(/\s/g, '')
+        .replace(/\$/g, '')
+        .replace(',', '.')
+        .replace(/[^0-9.-]/g, '');
+
+      if (!valeur) {
+        return null;
+      }
+
+      const nombre = Number(valeur);
+
+      return isFinite(nombre)
+        ? Math.abs(
+            Math.round(nombre * 100) / 100
+          )
+        : null;
+    }
+
+    function numeroMoisPdf(mois) {
+      const cle = String(mois || '')
+        .toUpperCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .slice(0, 3);
+
+      const map = {
+        JAN: 0,
+        FEV: 1,
+        MAR: 2,
+        AVR: 3,
+        MAI: 4,
+        JUN: 5,
+        JUI: 6,
+        AOU: 7,
+        SEP: 8,
+        OCT: 9,
+        NOV: 10,
+        DEC: 11
+      };
+
+      return Object.prototype.hasOwnProperty.call(map, cle)
+        ? map[cle]
+        : -1;
+    }
+
+    function extraireAnneeNomFichier(nom) {
+      const match = String(nom || '').match(
+        /(?:^|[^0-9])(20\d{2})(?:[01]\d[0-3]\d)?(?:[^0-9]|$)/
+      );
+
+      return match
+        ? Number(match[1])
+        : null;
+    }
+
+    function lireFichierBase64(fichier) {
+      return new Promise(function(resolve, reject) {
+        const lecteur = new FileReader();
+
+        lecteur.onload = function(evenement) {
+          const valeur = String(
+            evenement.target.result || ''
+          );
+
+          const position = valeur.indexOf(',');
+
+          resolve(
+            position >= 0
+              ? valeur.slice(position + 1)
+              : valeur
+          );
+        };
+
+        lecteur.onerror = function() {
+          reject(
+            new Error(
+              'Impossible de lire « ' +
+              fichier.name +
+              ' ».'
+            )
+          );
+        };
+
+        lecteur.readAsDataURL(fichier);
+      });
+    }
+
     function demarrerProgression() {
       arreterMinuterie();
 
       debutImportation = Date.now();
-      fichier.disabled = true;
+      fichiers.disabled = true;
+      lienGoogle.disabled = true;
       importer.disabled = true;
       importer.textContent = 'Importation en cours…';
-
       message.className = 'message';
       message.textContent = '';
       fermer.style.display = 'none';
 
       progression.className =
         'progression progression-visible';
+
       progressionDetail.textContent =
         'Lecture et analyse du relevé bancaire…';
 
       minuterie = setInterval(function() {
         const secondes = Math.max(
           0,
-          Math.floor((Date.now() - debutImportation) / 1000)
+          Math.floor(
+            (Date.now() - debutImportation) / 1000
+          )
         );
 
-        progressionDetail.textContent =
-          'Traitement en cours — ' +
-          secondes +
-          ' seconde' +
-          (secondes > 1 ? 's' : '') +
-          ' écoulée' +
-          (secondes > 1 ? 's' : '') +
-          '.';
+        if (
+          progressionDetail.textContent
+            .indexOf('Fichier ') !== 0
+        ) {
+          progressionDetail.textContent =
+            'Traitement en cours — ' +
+            secondes +
+            ' seconde' +
+            (secondes > 1 ? 's' : '') +
+            '.';
+        }
       }, 1000);
     }
 
-    function importationTerminee(resultat) {
+    function afficherResultats(resultats, erreurs) {
       arreterMinuterie();
 
       const argent = new Intl.NumberFormat('fr-CA', {
@@ -320,73 +806,103 @@
         currency: 'CAD'
       });
 
+      const totalImportees = resultats.reduce(
+        function(total, resultat) {
+          return total + Number(resultat.importees || 0);
+        },
+        0
+      );
+
+      const totalDoublons = resultats.reduce(
+        function(total, resultat) {
+          return total + Number(resultat.doublons || 0);
+        },
+        0
+      );
+
+      const totalRejetees = resultats.reduce(
+        function(total, resultat) {
+          return total + Number(resultat.rejetees || 0);
+        },
+        0
+      );
+
       let contenu =
         '<strong>Importation terminée</strong><br>' +
         'Transactions importées : ' +
-        resultat.importees +
-        '<br>' +
-        'Doublons ignorés : ' +
-        resultat.doublons +
-        '<br>' +
-        'Lignes rejetées : ' +
-        resultat.rejetees;
+        totalImportees +
+        '<br>Doublons ignorés : ' +
+        totalDoublons +
+        '<br>Lignes rejetées : ' +
+        totalRejetees;
 
-      if (resultat.importees > 0) {
+      resultats.forEach(function(resultat) {
         contenu +=
-          '<br><br>Solde initial calculé : ' +
-          argent.format(resultat.soldeInitial) +
-          '<br>Solde final : ' +
-          argent.format(resultat.soldeFinal);
+          '<div class="detail-source"><strong>' +
+          escapeHtml(resultat.source || 'Source') +
+          '</strong><br>' +
+          'Importées : ' +
+          Number(resultat.importees || 0) +
+          ' — Doublons : ' +
+          Number(resultat.doublons || 0);
 
-        if (Math.abs(resultat.ecartOuverture) < 0.01) {
+        if (
+          resultat.soldeInitial !== null &&
+          typeof resultat.soldeInitial !== 'undefined' &&
+          resultat.soldeFinal !== null &&
+          typeof resultat.soldeFinal !== 'undefined'
+        ) {
           contenu +=
-            '<br><strong>' +
-            'Le solde initial correspond au classeur.' +
-            '</strong>';
-        } else {
+            '<br>Solde initial calculé : ' +
+            argent.format(resultat.soldeInitial) +
+            '<br>Solde final : ' +
+            argent.format(resultat.soldeFinal);
+        }
+
+        if (resultat.avertissementRegles) {
           contenu +=
             '<br><span class="avertissement">' +
-            'Écart du solde initial : ' +
-            argent.format(resultat.ecartOuverture) +
+            escapeHtml(resultat.avertissementRegles) +
             '</span>';
         }
-      } else if (resultat.message) {
-        contenu += '<br><br>' + resultat.message;
-      }
 
-      // Avertissement des règles bancaires (import réussi mais règles partiellement appliquées)
-      if (resultat.avertissementRegles) {
+        if (resultat.message) {
+          contenu +=
+            '<br>' +
+            escapeHtml(resultat.message);
+        }
+
+        contenu += '</div>';
+      });
+
+      erreurs.forEach(function(erreur) {
         contenu +=
-          '<div class="avertissement-regles">' +
-          '<strong>Règles bancaires</strong>' +
-          escapeHtml(resultat.avertissementRegles) +
+          '<div class="detail-source avertissement">' +
+          '<strong>' +
+          escapeHtml(erreur.source) +
+          '</strong><br>' +
+          escapeHtml(erreur.message) +
           '</div>';
-      }
+      });
 
-      // Conflits de règles : plusieurs règles correspondaient à une même transaction
-      if (resultat.conflitsRegles && resultat.conflitsRegles.length > 0) {
-        const n = resultat.conflitsRegles.length;
-        let blocConflits =
-          '<div class="avertissement-regles">' +
-          '<strong>' + n + ' conflit' + (n > 1 ? 's' : '') +
-          ' de règles bancaires — suggestions non appliquées</strong>';
-        resultat.conflitsRegles.forEach(function(c) {
-          blocConflits +=
-            'Ligne ' + escapeHtml(String(c.ligne)) +
-            ' — ' + escapeHtml(c.description || '') +
-            '<br><em>' + escapeHtml(c.message || '') + '</em><br>';
-        });
-        blocConflits += '</div>';
-        contenu += blocConflits;
+      if (!resultats.length && erreurs.length) {
+        afficherErreur(
+          erreurs
+            .map(function(erreur) {
+              return erreur.source +
+                ' : ' +
+                erreur.message;
+            })
+            .join('\n')
+        );
+        return;
       }
 
       zoneImport.style.display = 'none';
       progression.className = 'progression';
       confidentiel.style.display = 'none';
-
       message.className = 'message succes';
       message.innerHTML = contenu;
-
       importer.style.display = 'none';
       fermer.style.display = 'block';
 
@@ -400,18 +916,26 @@
       arreterMinuterie();
 
       progression.className = 'progression';
-      fichier.disabled = false;
+      fichiers.disabled = false;
+      lienGoogle.disabled = false;
       importer.disabled = false;
       importer.textContent = 'Analyser et importer';
 
       message.className = 'message erreur';
       message.textContent = texte;
+
       fermer.style.display = 'block';
 
       message.scrollIntoView({
         behavior: 'smooth',
         block: 'start'
       });
+    }
+
+    function texteErreur(erreur) {
+      return erreur && erreur.message
+        ? erreur.message
+        : String(erreur);
     }
 
     function arreterMinuterie() {
@@ -432,3 +956,5 @@
   </script>
 </body>
 </html>
+
+
