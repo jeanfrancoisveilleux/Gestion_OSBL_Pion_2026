@@ -4,7 +4,6 @@ const CONFIG_OSBL = {
     'REÇUS_FACTURES',
     'CONTRATS',
     'RELEVÉS_BANCAIRES',
-    'PROJETS',
     'SUBVENTIONS',
     'PARTENAIRES',
     'RAPPORTS',
@@ -89,11 +88,12 @@ function afficherSaisieTransaction() {
 function obtenirOptionsTransaction() {
   const ss = SpreadsheetApp.getActive();
   const comptes = ss.getSheetByName('Comptes');
-  const data = ss.getSheetByName('DATA');
+  const fournisseurs = ss.getSheetByName('Fournisseurs');
+  const programmes = ss.getSheetByName('Programmes');
 
-  if (!comptes || !data) {
+  if (!comptes || !fournisseurs || !programmes) {
     throw new Error(
-      'Les onglets Comptes ou DATA sont introuvables.'
+      'Les onglets Comptes, Fournisseurs ou Programmes sont introuvables.'
     );
   }
 
@@ -112,30 +112,31 @@ function obtenirOptionsTransaction() {
       };
     });
 
-  const listeTiers = data
-    .getRange(6, 1, Math.max(data.getLastRow() - 5, 1), 4)
+  const listeTiers = fournisseurs
+    .getRange(6, 1, Math.max(fournisseurs.getLastRow() - 5, 1), 11)
     .getDisplayValues()
     .filter(function(ligne) {
       return String(ligne[0] || '').trim() &&
         String(ligne[1] || '').trim() &&
-        String(ligne[3] || '').trim() === 'Oui';
+        String(ligne[10] || '').trim() === 'Oui';
     })
     .map(function(ligne) {
       return {
         id: String(ligne[0] || '').trim(),
         nom: String(ligne[1] || '').trim(),
-        type: String(ligne[2] || '').trim()
+        type: 'Fournisseur'
       };
     })
     .sort(function(a, b) {
       return a.nom.localeCompare(b.nom, 'fr');
     });
 
-  const listeProgrammes = data
-    .getRange(6, 7, Math.max(data.getLastRow() - 5, 1), 3)
+  const listeProgrammes = programmes
+    .getRange(6, 1, Math.max(programmes.getLastRow() - 5, 1), 3)
     .getDisplayValues()
     .filter(function(ligne) {
-      return String(ligne[1] || '').trim() &&
+      return String(ligne[0] || '').trim() &&
+        String(ligne[1] || '').trim() &&
         String(ligne[2] || '').trim() === 'Oui';
     })
     .map(function(ligne) {
@@ -157,7 +158,7 @@ function obtenirOptionsTransaction() {
   };
 }
 
-function ajouterTiersTransaction(nom, type) {
+function ajouterTiersTransaction(nom) {
   const verrou = LockService.getDocumentLock();
 
   if (!verrou.tryLock(30000)) {
@@ -168,25 +169,18 @@ function ajouterTiersTransaction(nom, type) {
 
   try {
     const ss = SpreadsheetApp.getActive();
-    const data = ss.getSheetByName('DATA');
     const fournisseurs = ss.getSheetByName('Fournisseurs');
 
-    if (!data) {
-      throw new Error('L’onglet DATA est introuvable.');
+    if (!fournisseurs) {
+      throw new Error('L’onglet Fournisseurs est introuvable.');
     }
 
     const nomPropre = String(nom || '')
       .replace(/\s+/g, ' ')
       .trim();
 
-    const typePropre = String(type || '').trim();
-
     if (!nomPropre) {
-      throw new Error('Le nom du client ou fournisseur est obligatoire.');
-    }
-
-    if (!['Fournisseur', 'Client', 'Autre'].includes(typePropre)) {
-      throw new Error('Le type de tiers est invalide.');
+      throw new Error('Le nom du fournisseur est obligatoire.');
     }
 
     const normaliser = function(valeur) {
@@ -198,88 +192,60 @@ function ajouterTiersTransaction(nom, type) {
         .trim();
     };
 
-    const derniereLigne = Math.max(data.getLastRow(), 6);
-    const existants = data
-      .getRange(6, 1, derniereLigne - 5, 4)
+    const nombreLignes = Math.max(fournisseurs.getLastRow() - 5, 1);
+    const existants = fournisseurs
+      .getRange(6, 1, nombreLignes, 11)
       .getDisplayValues();
 
-    const deja = existants.find(function(ligne) {
-      return normaliser(ligne[1]) === normaliser(nomPropre);
-    });
-
-    if (deja) {
-      return {
-        id: String(deja[0] || '').trim(),
-        nom: String(deja[1] || '').trim(),
-        type: String(deja[2] || '').trim(),
-        existait: true
-      };
-    }
-
-    const prefixe =
-      typePropre === 'Fournisseur'
-        ? 'FOU'
-        : typePropre === 'Client'
-          ? 'CLI'
-          : 'AUT';
-
     let numeroMax = 0;
+    let trouve = null;
 
-    existants.forEach(function(ligne) {
+    existants.forEach(function(ligne, index) {
       const id = String(ligne[0] || '').trim();
-      const match = id.match(new RegExp('^' + prefixe + '-(\\d{4})$'));
+      const match = id.match(/^FOU-(\d{4})$/);
 
       if (match) {
         numeroMax = Math.max(numeroMax, Number(match[1]));
       }
+
+      if (
+        !trouve &&
+        normaliser(ligne[1]) === normaliser(nomPropre)
+      ) {
+        trouve = {
+          ligne: index + 6,
+          id: id,
+          nom: String(ligne[1] || '').trim(),
+          actif: String(ligne[10] || '').trim()
+        };
+      }
     });
 
-    if (typePropre === 'Fournisseur' && fournisseurs) {
-      const idsFournisseurs = fournisseurs
-        .getRange(
-          6,
-          1,
-          Math.max(fournisseurs.getLastRow() - 5, 1),
-          1
-        )
-        .getDisplayValues()
-        .flat();
+    if (trouve) {
+      if (trouve.actif !== 'Oui') {
+        fournisseurs
+          .getRange(trouve.ligne, 11)
+          .setValue('Oui');
+      }
 
-      idsFournisseurs.forEach(function(id) {
-        const match = String(id || '').match(/^FOU-(\d{4})$/);
-
-        if (match) {
-          numeroMax = Math.max(numeroMax, Number(match[1]));
-        }
-      });
+      return {
+        id: trouve.id,
+        nom: trouve.nom,
+        type: 'Fournisseur',
+        existait: true
+      };
     }
 
     const id =
-      prefixe + '-' +
+      'FOU-' +
       String(numeroMax + 1).padStart(4, '0');
 
-    const ligneData = prochaineLigneLibre_(data, 1, 6);
+    const ligneFournisseur =
+      prochaineLigneLibre_(fournisseurs, 1, 6);
 
-    data.getRange(ligneData, 1, 1, 5).setValues([[
-      id,
-      nomPropre,
-      typePropre,
-      'Oui',
-      typePropre === 'Fournisseur'
-        ? 'Fournisseurs'
-        : 'Saisie transaction'
-    ]]);
-
-    if (typePropre === 'Fournisseur' && fournisseurs) {
-      const ligneFournisseur =
-        prochaineLigneLibre_(fournisseurs, 1, 6);
-
-      fournisseurs.getRange(
-        ligneFournisseur,
-        1,
-        1,
-        12
-      ).setValues([[
+    fournisseurs
+      .getRange(ligneFournisseur, 1, 1, 12)
+      .setValues([[
         id,
         nomPropre,
         nomPropre,
@@ -293,14 +259,13 @@ function ajouterTiersTransaction(nom, type) {
         'Oui',
         'Créé depuis la saisie de transaction'
       ]]);
-    }
 
     SpreadsheetApp.flush();
 
     return {
       id: id,
       nom: nomPropre,
-      type: typePropre,
+      type: 'Fournisseur',
       existait: false
     };
   } finally {
@@ -479,14 +444,14 @@ function enregistrerTransaction(donnees) {
     }
 
     ventilation
-      .getRange(ligneVentilation, 13)
+      .getRange(ligneVentilation, 11)
       .setValue(montant)
       .setNumberFormat(
         '$#,##0.00;[Red]-$#,##0.00'
       );
 
     ventilation
-      .getRange(ligneVentilation, 14)
+      .getRange(ligneVentilation, 12)
       .setValue('Saisie manuelle V2');
 
     SpreadsheetApp.flush();
@@ -558,7 +523,7 @@ function enregistrerTransaction(donnees) {
 
         if (ventilation) {
           [
-            2, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14
+            2, 4, 6, 11, 12
           ].forEach(function(colonne) {
             ventilation
               .getRange(ligneVentilation, colonne)
@@ -848,8 +813,11 @@ function verifierSysteme() {
     'Reçus V2',
     'Comptes',
     'Programmes',
-
     'Fournisseurs',
+    'Contacts',
+    'Configuration',
+    '_Ventilation auto',
+    'Rapports',
     'Inventaire',
     'Budgets',
     'Vue financière',

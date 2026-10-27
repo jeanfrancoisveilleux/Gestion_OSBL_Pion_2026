@@ -1679,16 +1679,16 @@ function importerTransactionsBancaires_(
         feuille
           .getRange(
             6,
-            24,
+            23,
             1,
-            13
+            11
           )
           .copyTo(
             feuille.getRange(
               ancienneMax + 1,
-              24,
+              23,
               ligneFinale - ancienneMax,
-              13
+              11
             ),
             SpreadsheetApp.CopyPasteType.PASTE_NORMAL,
             false

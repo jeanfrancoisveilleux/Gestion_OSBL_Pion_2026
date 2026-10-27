@@ -49,7 +49,7 @@
       <option value="Revenu">Revenu</option>
     </select>
 
-    <label for="tiersNom">Client / fournisseur</label>
+    <label for="tiersNom">Fournisseur (optionnel)</label>
     <div class="ligne-tiers">
       <input id="tiersNom" type="text" list="listeTiers" autocomplete="off"
         placeholder="Commencez à écrire un nom">
@@ -62,14 +62,8 @@
     </div>
 
     <div id="ajoutTiers" class="ajout-tiers">
-      <label for="typeNouveauTiers">Type du nouveau tiers</label>
-      <select id="typeNouveauTiers">
-        <option value="Fournisseur">Fournisseur</option>
-        <option value="Client">Client</option>
-        <option value="Autre">Autre</option>
-      </select>
-      <button id="confirmerAjoutTiers" class="petit-bouton" type="button"
-        style="margin-top:9px;width:100%;">Ajouter ce nom à DATA</button>
+<button id="confirmerAjoutTiers" class="petit-bouton" type="button"
+        style="margin-top:9px;width:100%;">Ajouter ce fournisseur</button>
     </div>
 
     <label for="description">Description *</label>
@@ -204,7 +198,6 @@
 
     document.getElementById('confirmerAjoutTiers').addEventListener('click', function() {
       const nom = tiersNom.value.trim();
-      const typeNouveau = document.getElementById('typeNouveauTiers').value;
 
       if (!nom) {
         afficherErreur({message:'Écrivez d’abord le nom à ajouter.'});
@@ -231,7 +224,7 @@
           message.className = 'message succes';
           message.textContent = resultat.existait
             ? 'Ce nom existait déjà : ' + resultat.nom
-            : 'Ajouté à DATA : ' + resultat.nom;
+            : 'Fournisseur ajouté : ' + resultat.nom;
 
           btn.disabled = false;
         })
@@ -239,7 +232,7 @@
           btn.disabled = false;
           afficherErreur(erreur);
         })
-        .ajouterTiersTransaction(nom, typeNouveau);
+        .ajouterTiersTransaction(nom);
     });
 
     function choisirPiece(source, autre) {
@@ -314,7 +307,7 @@
 
       if (tiersNom.value.trim() && !idTiers.value) {
         afficherErreur({
-          message:'Le client / fournisseur n’est pas dans DATA. Cliquez sur « Ajouter » pour l’enregistrer avant de continuer.'
+          message:'Ce fournisseur n’est pas dans Fournisseurs. Cliquez sur « Ajouter » pour l’enregistrer avant de continuer.'
         });
         return;
       }
