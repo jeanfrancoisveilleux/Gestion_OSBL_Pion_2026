@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: Arial, sans-serif; color: #202124; background: #f8f9fa; }
+      main { max-width: 520px; margin: 0 auto; padding: 18px; }
+      h1 { margin: 0 0 6px; font-size: 26px; }
+      .intro { margin: 0 0 18px; color: #5f6368; line-height: 1.45; }
+      .carte { margin-bottom: 14px; padding: 16px; border: 1px solid #dadce0; border-radius: 12px; background: #fff; }
+      label.titre { display: block; margin-bottom: 6px; font-weight: 700; }
+      input, select, textarea, button { width: 100%; font: inherit; }
+      input, select, textarea { min-height: 44px; padding: 9px 10px; border: 1px solid #bdc1c6; border-radius: 8px; background: #fff; }
+      textarea { min-height: 80px; resize: vertical; }
+      .champ { margin-bottom: 13px; }
+      .deux { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .entree-fichier { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+      .bouton-photo { display: flex; min-height: 66px; align-items: center; justify-content: center; padding: 13px; border: 2px solid #1a73e8; border-radius: 11px; color: #1558b0; background: #fff; font-size: 18px; font-weight: 700; text-align: center; cursor: pointer; }
+      .bouton-photo.principal { color: #fff; background: #1a73e8; }
+      .fichier { margin: 10px 0 0; color: #5f6368; font-size: 13px; overflow-wrap: anywhere; }
+      details { margin-top: 14px; }
+      summary { cursor: pointer; color: #1558b0; font-weight: 700; }
+      .details-contenu { padding-top: 14px; }
+      button { min-height: 52px; border: 0; border-radius: 9px; color: #fff; background: #188038; font-weight: 700; cursor: pointer; }
+      button:disabled { opacity: 0.55; cursor: not-allowed; }
+      .message { display: none; margin-bottom: 14px; padding: 12px; border-radius: 9px; line-height: 1.4; white-space: pre-wrap; }
+      .message.visible { display: block; }
+      .message.info { background: #e8f0fe; color: #174ea6; }
+      .message.succes { background: #e6f4ea; color: #0d652d; }
+      .message.erreur { background: #fce8e6; color: #a50e0e; }
+      .chargement { display: inline-block; width: 16px; height: 16px; margin-right: 8px; border: 2px solid rgba(255,255,255,.45); border-top-color: #fff; border-radius: 50%; vertical-align: -3px; animation: tourner .8s linear infinite; }
+      @keyframes tourner { to { transform: rotate(360deg); } }
+      @media (max-width: 420px) { main { padding: 12px; } h1 { font-size: 23px; } .deux { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>📷 Nouveau reçu</h1>
+      <p class="intro">Prenez la photo. Google Drive tentera ensuite de lire automatiquement le reçu. Vous pouvez laisser les autres champs vides.</p>
+
+      <div id="message" class="message" role="status" aria-live="polite"></div>
+
+      <form id="formRecu">
+        <section class="carte">
+          <input id="photo" class="entree-fichier" name="photo" type="file" accept="image/*" capture="environment">
+          <label class="bouton-photo principal" for="photo">📷 Prendre une photo</label>
+
+          <input id="fichier" class="entree-fichier" name="fichier" type="file"
+            accept="image/jpeg,image/png,image/heic,image/heif,image/webp,application/pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,.pdf">
+          <label class="bouton-photo" for="fichier" style="margin-top:10px">📎 Choisir une image ou un PDF</label>
+
+          <p id="fichierSelectionne" class="fichier">Aucun fichier sélectionné.</p>
+        </section>
+
+        <section class="carte">
+          <div class="deux">
+            <div class="champ">
+              <label class="titre" for="dateRecu">Date</label>
+              <input id="dateRecu" name="dateRecu" type="date" required>
+            </div>
+            <div class="champ">
+              <label class="titre" for="heure">Heure</label>
+              <input id="heure" name="heure" type="time">
+            </div>
+          </div>
+
+          <div class="champ">
+            <label class="titre" for="idTransactionLiee">Lier à une transaction existante</label>
+            <select id="idTransactionLiee" name="idTransactionLiee">
+              <option value="">Aucune — créer un reçu à jumeler plus tard</option>
+            </select>
+            <div class="fichier">
+              Facultatif. Choisissez une transaction si elle existe déjà.
+            </div>
+          </div>
+
+          <div class="champ">
+            <label class="titre" for="idFournisseur">Fournisseur</label>
+            <select id="idFournisseur" name="idFournisseur">
+              <option value="">À compléter plus tard</option>
+            </select>
+          </div>
+
+          <div class="champ">
+            <label class="titre" for="total">Total</label>
+            <input id="total" name="total" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Facultatif">
+          </div>
+
+          <details>
+            <summary>Plus de détails</summary>
+            <div class="details-contenu">
+              <div class="deux">
+                <div class="champ">
+                  <label class="titre" for="sousTotal">Sous-total</label>
+                  <input id="sousTotal" name="sousTotal" type="number" min="0" step="0.01" inputmode="decimal">
+                </div>
+                <div class="champ">
+                  <label class="titre" for="pourboire">Pourboire</label>
+                  <input id="pourboire" name="pourboire" type="number" min="0" step="0.01" inputmode="decimal">
+                </div>
+              </div>
+              <div class="deux">
+                <div class="champ">
+                  <label class="titre" for="tps">TPS</label>
+                  <input id="tps" name="tps" type="number" min="0" step="0.01" inputmode="decimal">
+                </div>
+                <div class="champ">
+                  <label class="titre" for="tvq">TVQ</label>
+                  <input id="tvq" name="tvq" type="number" min="0" step="0.01" inputmode="decimal">
+                </div>
+              </div>
+              <div class="champ">
+                <label class="titre" for="autresTaxes">Autres taxes</label>
+                <input id="autresTaxes" name="autresTaxes" type="number" min="0" step="0.01" inputmode="decimal">
+              </div>
+              <div class="deux">
+                <div class="champ">
+                  <label class="titre" for="modePaiement">Paiement</label>
+                  <select id="modePaiement" name="modePaiement">
+                    <option value="">Non précisé</option>
+                    <option value="Débit">Débit</option>
+                    <option value="Crédit">Crédit</option>
+                    <option value="Comptant">Comptant</option>
+                    <option value="Autre">Autre</option>
+                  </select>
+                </div>
+                <div class="champ">
+                  <label class="titre" for="quatreChiffres">4 derniers chiffres</label>
+                  <input id="quatreChiffres" name="quatreChiffres" type="text" inputmode="numeric" maxlength="4" pattern="[0-9]{0,4}">
+                </div>
+              </div>
+              <div class="champ">
+                <label class="titre" for="notes">Notes</label>
+                <textarea id="notes" name="notes" maxlength="500"></textarea>
+              </div>
+            </div>
+          </details>
+        </section>
+
+        <button id="enregistrer" type="submit" disabled>Enregistrer et lire le reçu</button>
+      </form>
+    </main>
+
+    <script>
+      'use strict';
+
+      let etat = {
+        fichier: null,
+        tailleMaxMo: 15,
+        chargement: false,
+        transactions: []
+      };
+
+      document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('formRecu').addEventListener('submit', soumettre);
+        document.getElementById('photo').addEventListener('change', function() {
+          choisirFichier('photo', 'fichier');
+        });
+        document.getElementById('fichier').addEventListener('change', function() {
+          choisirFichier('fichier', 'photo');
+        });
+        document.getElementById('idTransactionLiee').addEventListener(
+          'change',
+          transactionChoisie
+        );
+        charger();
+      });
+
+      function charger() {
+        definirChargement(true);
+
+        google.script.run
+          .withSuccessHandler(function(donnees) {
+            document.getElementById('dateRecu').value = donnees.dateAujourdhui || '';
+            etat.tailleMaxMo = Number(donnees.tailleMaxMo || 15);
+
+            const select = document.getElementById('idFournisseur');
+            (donnees.fournisseurs || []).forEach(function(fournisseur) {
+              const option = document.createElement('option');
+              option.value = fournisseur.id;
+              option.textContent = fournisseur.nom;
+              select.appendChild(option);
+            });
+
+            etat.transactions = donnees.transactions || [];
+            const selectTransaction =
+              document.getElementById('idTransactionLiee');
+
+            etat.transactions.forEach(function(transaction) {
+              const option = document.createElement('option');
+              option.value = transaction.id;
+
+              const montant = transaction.montant == null
+                ? ''
+                : ' — ' + Number(transaction.montant).toFixed(2).replace('.', ',') + ' $';
+
+              const fournisseur = transaction.fournisseur
+                ? ' — ' + transaction.fournisseur
+                : '';
+
+              option.textContent =
+                transaction.date + ' — ' +
+                transaction.description +
+                montant +
+                fournisseur;
+
+              selectTransaction.appendChild(option);
+            });
+
+            definirChargement(false);
+          })
+          .withFailureHandler(function(erreur) {
+            definirChargement(false);
+            afficherMessage(erreur && erreur.message ? erreur.message : 'Impossible de préparer la capture.', 'erreur');
+          })
+          .obtenirDonneesCaptureRecuV2();
+      }
+
+
+      function transactionChoisie() {
+        const id = document.getElementById('idTransactionLiee').value;
+
+        if (!id) {
+          return;
+        }
+
+        const transaction = etat.transactions.find(function(item) {
+          return item.id === id;
+        });
+
+        if (!transaction) {
+          return;
+        }
+
+        if (transaction.date) {
+          document.getElementById('dateRecu').value = transaction.date;
+        }
+
+        if (
+          transaction.montant != null &&
+          document.getElementById('total').value === ''
+        ) {
+          document.getElementById('total').value =
+            Number(transaction.montant).toFixed(2);
+        }
+
+        if (
+          transaction.idFournisseur &&
+          document.getElementById('idFournisseur').value === ''
+        ) {
+          document.getElementById('idFournisseur').value =
+            transaction.idFournisseur;
+        }
+      }
+
+      function choisirFichier(sourceId, autreId) {
+        const source = document.getElementById(sourceId);
+        const autre = document.getElementById(autreId);
+        const fichier = source.files && source.files[0] ? source.files[0] : null;
+
+        if (fichier) {
+          autre.value = '';
+          etat.fichier = fichier;
+          document.getElementById('fichierSelectionne').textContent =
+            fichier.name + ' — ' + formaterTaille(fichier.size);
+
+          if (fichier.size > etat.tailleMaxMo * 1024 * 1024) {
+            afficherMessage('Le fichier dépasse la limite de ' + etat.tailleMaxMo + ' Mo.', 'erreur');
+          } else {
+            masquerMessage();
+          }
+        } else {
+          etat.fichier = null;
+          document.getElementById('fichierSelectionne').textContent =
+            'Aucun fichier sélectionné.';
+        }
+
+        actualiserBouton();
+      }
+
+      function soumettre(evenement) {
+        evenement.preventDefault();
+
+        if (etat.chargement || !etat.fichier) return;
+
+        if (etat.fichier.size > etat.tailleMaxMo * 1024 * 1024) {
+          afficherMessage('Le fichier dépasse la limite de ' + etat.tailleMaxMo + ' Mo.', 'erreur');
+          return;
+        }
+
+        definirChargement(true);
+        afficherMessage('Enregistrement de la photo et lecture automatique…', 'info');
+
+        google.script.run
+          .withSuccessHandler(function(resultat) {
+            let texte = 'Reçu enregistré ✅\n' + resultat.idRecu + '\nÉtat : ' + resultat.etat;
+
+            if (resultat.ocr && resultat.ocr.succes) {
+              texte += '\n\nLecture automatique :\n' + resultat.ocr.resume;
+              afficherMessage(texte, 'succes');
+            } else if (resultat.ocr) {
+              texte += '\n\nLa photo est enregistrée, mais la lecture automatique a échoué :\n' + resultat.ocr.message;
+              afficherMessage(texte, 'erreur');
+            } else {
+              afficherMessage(texte, 'succes');
+            }
+            reinitialiser();
+            definirChargement(false);
+          })
+          .withFailureHandler(function(erreur) {
+            definirChargement(false);
+            afficherMessage(erreur && erreur.message ? erreur.message : 'L’enregistrement a échoué.', 'erreur');
+          })
+          .enregistrerRecuV2(document.getElementById('formRecu'));
+      }
+
+      function reinitialiser() {
+        document.getElementById('photo').value = '';
+        document.getElementById('fichier').value = '';
+        document.getElementById('idTransactionLiee').value = '';
+        document.getElementById('fichierSelectionne').textContent = 'Aucun fichier sélectionné.';
+        document.getElementById('total').value = '';
+        document.getElementById('sousTotal').value = '';
+        document.getElementById('tps').value = '';
+        document.getElementById('tvq').value = '';
+        document.getElementById('autresTaxes').value = '';
+        document.getElementById('pourboire').value = '';
+        document.getElementById('quatreChiffres').value = '';
+        document.getElementById('notes').value = '';
+        etat.fichier = null;
+        actualiserBouton();
+      }
+
+      function definirChargement(chargement) {
+        etat.chargement = chargement;
+        const bouton = document.getElementById('enregistrer');
+
+        if (chargement) {
+          bouton.innerHTML = '<span class="chargement"></span>Traitement…';
+        } else {
+          bouton.textContent = 'Enregistrer et lire le reçu';
+        }
+
+        actualiserBouton();
+      }
+
+      function actualiserBouton() {
+        const bouton = document.getElementById('enregistrer');
+        const fichierValide = etat.fichier &&
+          etat.fichier.size <= etat.tailleMaxMo * 1024 * 1024;
+        bouton.disabled = Boolean(etat.chargement || !fichierValide);
+      }
+
+      function afficherMessage(texte, type) {
+        const element = document.getElementById('message');
+        element.textContent = texte;
+        element.className = 'message visible ' + type;
+      }
+
+      function masquerMessage() {
+        const element = document.getElementById('message');
+        element.textContent = '';
+        element.className = 'message';
+      }
+
+      function formaterTaille(octets) {
+        if (octets < 1024 * 1024) {
+          return Math.max(1, Math.round(octets / 1024)) + ' Ko';
+        }
+        return (octets / 1024 / 1024).toFixed(1).replace('.', ',') + ' Mo';
+      }
+    </script>
+  </body>
+</html>
+
