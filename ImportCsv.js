@@ -1522,7 +1522,13 @@ function importerTransactionsBancaires_(
     );
   }
   const fuseau = ss.getSpreadsheetTimeZone();
-  const dernierIndex = Math.max(feuille.getLastRow(), 6);
+  const derniereLigneDonnees =
+    trouverDerniereLigneDonneesImport_(feuille);
+
+  const dernierIndex = Math.max(
+    derniereLigneDonnees,
+    6
+  );
   const existantes = feuille
     .getRange(
       6,
@@ -1627,7 +1633,7 @@ function importerTransactionsBancaires_(
       empreinte.slice(0, 10).toUpperCase();
     nouvellesLignes.push([
       identifiant,
-      date,
+      dateVersNumeroSerieSheets_(date, fuseau),
       description,
       montant,
       solde === '' ? '' : solde,
@@ -1660,7 +1666,10 @@ function importerTransactionsBancaires_(
     );
   }
   try {
-    const ligneDepart = feuille.getLastRow() + 1;
+    const ligneDepart = Math.max(
+      6,
+      derniereLigneDonnees + 1
+    );
     const ligneFinale =
       ligneDepart +
       nouvellesLignes.length -
@@ -1791,6 +1800,62 @@ function importerTransactionsBancaires_(
     verrou.releaseLock();
   }
 }
+
+function trouverDerniereLigneDonneesImport_(feuille) {
+  const premiereLigne = 6;
+  const nombreLignes =
+    feuille.getMaxRows() - premiereLigne + 1;
+
+  if (nombreLignes <= 0) {
+    return premiereLigne - 1;
+  }
+
+  const valeurs = feuille
+    .getRange(
+      premiereLigne,
+      1,
+      nombreLignes,
+      1
+    )
+    .getDisplayValues();
+
+  for (
+    let index = valeurs.length - 1;
+    index >= 0;
+    index--
+  ) {
+    if (
+      String(valeurs[index][0] || '').trim()
+    ) {
+      return premiereLigne + index;
+    }
+  }
+
+  return premiereLigne - 1;
+}
+
+function dateVersNumeroSerieSheets_(date, fuseau) {
+  const texte = Utilities.formatDate(
+    date,
+    fuseau || Session.getScriptTimeZone(),
+    'yyyy-MM-dd'
+  );
+
+  const morceaux = texte
+    .split('-')
+    .map(Number);
+
+  return (
+    Date.UTC(
+      morceaux[0],
+      morceaux[1] - 1,
+      morceaux[2]
+    ) /
+      86400000 +
+    25569
+  );
+}
+
 function creerCleTransactionImport_(
   date,
   description,
