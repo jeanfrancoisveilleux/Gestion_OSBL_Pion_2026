@@ -1534,7 +1534,7 @@ function importerTransactionsBancaires_(
       6,
       2,
       dernierIndex - 5,
-      4
+      5
     )
     .getValues();
   const clesExistantes = new Set();
@@ -1543,6 +1543,9 @@ function importerTransactionsBancaires_(
     const description = String(ligne[1] || '');
     const montant = Number(ligne[2]) || 0;
     const solde = ligne[3];
+    const referenceImport = String(
+      ligne[4] || ''
+    ).trim();
     if (!date && !description && !montant) {
       return;
     }
@@ -1552,6 +1555,7 @@ function importerTransactionsBancaires_(
         description,
         montant,
         solde,
+        referenceImport,
         fuseau
       )
     );
@@ -1599,11 +1603,25 @@ function importerTransactionsBancaires_(
     )
       .replace(/\s+/g, ' ')
       .trim();
+    const code = String(
+      transaction.code || ''
+    ).trim();
+    const reference = String(
+      transaction.reference ||
+      ('L' + (index + 1))
+    ).trim();
+    const referenceImport = [
+      code,
+      reference
+    ]
+      .filter(Boolean)
+      .join('-');
     const cle = creerCleTransactionImport_(
       date,
       description,
       montant,
       solde,
+      referenceImport,
       fuseau
     );
     if (clesExistantes.has(cle)) {
@@ -1619,13 +1637,6 @@ function importerTransactionsBancaires_(
       fuseau,
       'yyyy/MM/dd'
     );
-    const code = String(
-      transaction.code || ''
-    ).trim();
-    const reference = String(
-      transaction.reference ||
-      ('L' + (index + 1))
-    ).trim();
     const identifiant =
       'B-' +
       texteDate.replace(/\//g, '') +
@@ -1637,9 +1648,7 @@ function importerTransactionsBancaires_(
       description,
       montant,
       solde === '' ? '' : solde,
-      [code, reference]
-        .filter(Boolean)
-        .join('-'),
+      referenceImport,
       empreinte,
       '',
       '',
@@ -1694,26 +1703,45 @@ function importerTransactionsBancaires_(
       )
       .setValues(nouvellesLignes);
 
-    // Toujours preparer les colonnes V2 W:AG pour chaque nouveau lot importe.
-    // La ligne 6 sert de modele pour les formules, validations et formats.
-    // Cette copie doit se faire meme si la feuille possede deja assez de lignes.
-    feuille
-      .getRange(
-        6,
-        23,
-        1,
-        11
-      )
-      .copyTo(
-        feuille.getRange(
-          ligneDepart,
-          23,
-          nouvellesLignes.length,
-          11
-        ),
-        SpreadsheetApp.CopyPasteType.PASTE_NORMAL,
-        false
+    const modeleV2 = feuille.getRange(
+      6,
+      21,
+      1,
+      11
+    );
+    const cibleV2 = feuille.getRange(
+      ligneDepart,
+      21,
+      nouvellesLignes.length,
+      11
+    );
+    const formulesModeleV2 =
+      modeleV2.getFormulasR1C1()[0];
+    const validationsModeleV2 =
+      modeleV2.getDataValidations()[0];
+    const formatsModeleV2 =
+      modeleV2.getNumberFormats()[0];
+    const formulesLotV2 = [];
+    const validationsLotV2 = [];
+    const formatsLotV2 = [];
+    for (
+      let i = 0;
+      i < nouvellesLignes.length;
+      i++
+    ) {
+      formulesLotV2.push(
+        formulesModeleV2.slice()
       );
+      validationsLotV2.push(
+        validationsModeleV2.slice()
+      );
+      formatsLotV2.push(
+        formatsModeleV2.slice()
+      );
+    }
+    cibleV2.setFormulasR1C1(formulesLotV2);
+    cibleV2.setDataValidations(validationsLotV2);
+    cibleV2.setNumberFormats(formatsLotV2);
     feuille
       .getRange(
         ligneDepart,
@@ -1863,6 +1891,7 @@ function creerCleTransactionImport_(
   description,
   montant,
   solde,
+  referenceImport,
   fuseau
 ) {
   let texteDate = '';
@@ -1888,7 +1917,7 @@ function creerCleTransactionImport_(
     typeof solde !== 'undefined' &&
     isFinite(Number(solde));
   if (soldeDisponible) {
-    return [
+    const parties = [
       texteDate,
       montantNormalise.toFixed(2),
       (
@@ -1896,12 +1925,23 @@ function creerCleTransactionImport_(
           Number(solde) * 100
         ) / 100
       ).toFixed(2)
-    ].join('|');
+    ];
+    const referenceNormalisee =
+      normaliserEnteteImport_(
+        referenceImport
+      );
+    if (referenceNormalisee) {
+      parties.push(
+        referenceNormalisee
+      );
+    }
+    return parties.join('|');
   }
   return [
     texteDate,
     montantNormalise.toFixed(2),
-    normaliserEnteteImport_(description)
+    normaliserEnteteImport_(description),
+    normaliserEnteteImport_(referenceImport)
   ].join('|');
 }
 function calculerEmpreinte_(texte) {

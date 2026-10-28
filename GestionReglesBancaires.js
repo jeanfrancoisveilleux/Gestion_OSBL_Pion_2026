@@ -142,9 +142,9 @@ function appliquerReglesBancairesV2Import_(feuille, ligneDepart, nombreLignes, s
     return { avertissement: null };
   }
 
-  // Structure actuelle Import bancaire : A:AG = 33 colonnes.
+  // Structure actuelle Import bancaire : A:AE = 31 colonnes.
   const donnees = feuille
-    .getRange(ligneDepart, 1, nombreLignes, 33)
+    .getRange(ligneDepart, 1, nombreLignes, 31)
     .getValues();
 
   const comptes = dictionnaireV2_(ss, 'Comptes', 1, 2);
@@ -158,7 +158,7 @@ function appliquerReglesBancairesV2Import_(feuille, ligneDepart, nombreLignes, s
     const idImport = String(ligne[0] || '').trim();
     const description = String(ligne[2] || '').trim();
     const montant = Number(ligne[3] || 0);
-    const traitement = String(ligne[27] || '').trim();
+    const traitement = String(ligne[25] || '').trim();
 
     if (!idImport || traitement) {
       sortieHI.push([
@@ -167,13 +167,13 @@ function appliquerReglesBancairesV2Import_(feuille, ligneDepart, nombreLignes, s
       ]);
 
       sortiePV.push([
+        ligne[13] || '',
+        ligne[14] || '',
         ligne[15] || '',
         ligne[16] || '',
         ligne[17] || '',
         ligne[18] || '',
-        ligne[19] || '',
-        ligne[20] || '',
-        ligne[21] || ''
+        ligne[19] || ''
       ]);
       return;
     }
@@ -218,7 +218,7 @@ function appliquerReglesBancairesV2Import_(feuille, ligneDepart, nombreLignes, s
     .setValues(sortieHI);
 
   feuille
-    .getRange(ligneDepart, 16, nombreLignes, 7)
+    .getRange(ligneDepart, 14, nombreLignes, 7)
     .setNumberFormat('@')
     .setValues(sortiePV);
 
